@@ -145,35 +145,46 @@ jobs:
 
       - name: Pre-fetch third-party deps (manifest driven)
         run: |
-          cd arkcompiler_runtime_core
-          D=ark-third-party
-          mkdir -p "$D"
+          # 自适应布局：v4.1 独立构建在 static_core/（第三方放 static_core/third_party）
+          if [ -f static_core/CMakeLists.txt ]; then
+            CORE_DIR=static_core; DEST=static_core/third_party
+          else
+            CORE_DIR=.; DEST=ark-third-party
+          fi
+          echo "layout: $CORE_DIR -> $DEST" | tee deps-layout.txt
+          mkdir -p "$DEST"
+          MANIFEST=scripts/third-party-lists/public
+          [ -f "$MANIFEST" ] || MANIFEST=$CORE_DIR/scripts/third-party-lists/public
           while IFS=, read -r name repo ctype cid pmode smode; do
             case "$name" in ''|\#*) continue;; esac
             name=$(echo "$name" | xargs)
             [ -z "$name" ] && continue
-            [ -d "$D/$name/.git" ] && continue
+            [ -d "$DEST/$name/.git" ] && continue
             # git.linaro.org 不稳定，换 GitHub 官方镜像
             case "$repo" in *git.linaro.org*) repo="https://github.com/Linaro/vixl.git";; esac
             echo "== $name <- $repo ($ctype $cid)"
             case "$ctype" in
               branch|tag)
-                git clone -q --depth 1 --branch "$cid" "$repo" "$D/$name" || echo "clone $name FAILED"
+                git clone -q --depth 1 --branch "$cid" "$repo" "$DEST/$name" || echo "clone $name FAILED"
                 ;;
               commit)
-                git init -q "$D/$name"
-                git -C "$D/$name" fetch -q --depth 1 "$repo" "$cid" || echo "fetch $name FAILED"
-                git -C "$D/$name" checkout -q FETCH_HEAD || true
+                git init -q "$DEST/$name"
+                git -C "$DEST/$name" fetch -q --depth 1 "$repo" "$cid" || echo "fetch $name FAILED"
+                git -C "$DEST/$name" checkout -q FETCH_HEAD || true
                 ;;
             esac
-          done < scripts/third-party-lists/public
-          ls "$D"
+          done < "$MANIFEST"
+          ls "$DEST"
 
       - name: Build arkcompiler_runtime_core (CMake)
         run: |
-          cd arkcompiler_runtime_core
-          (cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
-            -DPANDA_ENABLE_CLANG_TIDY=false \
+          if [ -f static_core/CMakeLists.txt ]; then
+            CORE_DIR=static_core
+          else
+            CORE_DIR=.
+          fi
+          (cmake -S "$CORE_DIR" -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
+            -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
             && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
           tail -25 ../log-core.txt || true
 
@@ -210,6 +221,7 @@ jobs:
             | grep -v '\.cpp$' | head -40 | while read -r f; do
               cp "$f" out/bin/ 2>/dev/null || true
             done
+          cp arkcompiler_runtime_core/deps-layout.txt out/log/ 2>/dev/null || true
           cp log-*.txt out/log/ 2>/dev/null || true
           echo "binaries:"; ls -la out/bin | head -20
           echo "logs:"; ls -la out/log
