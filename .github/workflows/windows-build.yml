@@ -145,6 +145,7 @@ jobs:
 
       - name: Pre-fetch third-party deps (manifest driven)
         run: |
+          cd arkcompiler_runtime_core
           # 自适应布局：v4.1 独立构建在 static_core/（第三方放 static_core/third_party）
           if [ -f static_core/CMakeLists.txt ]; then
             CORE_DIR=static_core; DEST=static_core/third_party
@@ -178,6 +179,7 @@ jobs:
 
       - name: Build arkcompiler_runtime_core (CMake)
         run: |
+          cd arkcompiler_runtime_core
           if [ -f static_core/CMakeLists.txt ]; then
             CORE_DIR=static_core
           else
