@@ -11,23 +11,27 @@ permissions:
 
 jobs:
   build-x64:
-    name: Windows x64 (MSVC)
+    name: Windows x64 (MinGW64)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure (Visual Studio 2022, x64)
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc make
 
-      - name: Build
-        run: cmake --build build --config Release
+      - name: Build (x64)
+        shell: msys2 {0}
+        run: make -f scripts/Makefile.mingw CC=gcc HOW=HOW.exe
 
       - name: Package zip
         shell: pwsh
         run: |
           $out = "HOW-windows-x64"
           New-Item -ItemType Directory -Force $out | Out-Null
-          Copy-Item build\Release\HOW.exe $out\
+          Copy-Item HOW.exe $out\
           Copy-Item samples\MyFirstDemo.hap $out\
           Copy-Item README.md,LICENSE $out\
           Compress-Archive -Path $out -DestinationPath "$out.zip" -Force

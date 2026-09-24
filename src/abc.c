@@ -43,7 +43,9 @@ static void scan_strings(const unsigned char *b, long n, AbcInfo *o) {
                 if (d < 0x20 || d == 0x7F) { keep = 0; break; }
             }
             if (keep && !str_dup_exists(o, tmp)) {
-                snprintf(o->strings[o->nstr], sizeof(o->strings[0]), "%s", tmp);
+                int cp2 = cp > 47 ? 47 : cp;
+                memcpy(o->strings[o->nstr], tmp, (size_t)cp2);
+                o->strings[o->nstr][cp2] = 0;
                 o->nstr++;
             }
             i += L;
