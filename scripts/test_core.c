@@ -53,8 +53,11 @@ int main(void) {
     size_t jlen = 0;
     void *jd = mz_zip_reader_extract_to_heap(&z,
         mz_zip_reader_locate_file(&z, "pages/index.json", NULL, 0), &jlen, 0);
-    ((char *)jd)[jlen] = 0;
-    JV *ui = json5_parse((char *)jd);
+    char *js = (char *)malloc(jlen + 1); /* 安全拷贝并补 NUL */
+    memcpy(js, jd, jlen);
+    js[jlen] = 0;
+    JV *ui = json5_parse(js);
+    free(js);
     CHECK(ui != NULL, "json5_parse(pages/index.json)");
     JV *root = jv_get(ui, "root");
     JV *rootch = jv_get(root, "children");

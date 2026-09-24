@@ -88,8 +88,17 @@ static char *zip_read_entry(mz_zip_archive *z, const char *entry, long *outLen) 
     size_t len = 0;
     void *buf = mz_zip_reader_extract_to_heap(z, (mz_uint)idx, &len, 0);
     if (!buf) return NULL;
+    /* miniz 返回的缓冲区恰为 len 字节；拷贝到 len+1 并补 NUL，避免堆越界 */
+    char *out = (char *)malloc(len + 1);
+    if (!out) {
+        mz_free(buf);
+        return NULL;
+    }
+    memcpy(out, buf, len);
+    out[len] = 0;
+    mz_free(buf);
     if (outLen) *outLen = (long)len;
-    return (char *)buf;
+    return out;
 }
 
 int hap_probe(const wchar_t *hapPath, char *nameU8, int nameCap,
@@ -103,7 +112,6 @@ int hap_probe(const wchar_t *hapPath, char *nameU8, int nameCap,
     long len = 0;
     char *data = zip_read_entry(&z, "app.json5", &len);
     if (data) {
-        data[len] = 0; /* 便于当字符串 */
         JV *j = json5_parse(data);
         if (j) {
             JV *app = jv_get(j, "app");
@@ -126,7 +134,6 @@ int hap_probe(const wchar_t *hapPath, char *nameU8, int nameCap,
         long plen = 0;
         char *pack = zip_read_entry(&z, "pack.info", &plen);
         if (pack) {
-            pack[plen] = 0;
             JV *j = json5_parse(pack);
             JV *s = jv_get(j, "summary");
             JV *a = jv_get(s, "app");
