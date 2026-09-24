@@ -135,7 +135,7 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ clang llvm python3
+          sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov
 
       - name: Clone upstream repos
         run: |
@@ -187,6 +187,7 @@ jobs:
           fi
           (cmake -S "$CORE_DIR" -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
             -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
+            -DPANDA_ENABLE_COVERAGE=false \
             && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
           tail -25 ../log-core.txt || true
 
