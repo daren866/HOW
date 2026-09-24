@@ -1,4 +1,4 @@
-name: Windows Build & Release
+name: Build & Release (runtime + renderer integrated)
 
 on:
   push:
@@ -10,8 +10,9 @@ permissions:
   contents: write
 
 jobs:
+  # ---------- Windows 宿主 + 兼容层自测门禁 ----------
   build-x64:
-    name: Windows x64 (MinGW64)
+    name: HOW x64 + selftest (MinGW64)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +27,13 @@ jobs:
         shell: msys2 {0}
         run: make -f scripts/Makefile.mingw CC=gcc HOW=HOW.exe
 
+      - name: Selftest 兼容层运行验证（门禁）
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath ".\HOW.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if (Test-Path selftest-report.txt) { Get-Content selftest-report.txt }
+          exit $p.ExitCode
+
       - name: Package zip
         shell: pwsh
         run: |
@@ -37,21 +45,13 @@ jobs:
           Compress-Archive -Path $out -DestinationPath "$out.zip" -Force
           Get-ChildItem $out.zip
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: HOW-windows-x64
+          name: win-x64
           path: HOW-windows-x64.zip
 
-      - name: Upload zip to Releases (tag push only)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: HOW-windows-x64.zip
-          generate_release_notes: true
-
   build-xp:
-    name: Windows XP 兼容 (MinGW32)
+    name: HOW XP 兼容 + selftest (MinGW32)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,6 +66,13 @@ jobs:
         shell: msys2 {0}
         run: make -f scripts/Makefile.mingw XP=1 CC=gcc HOW=HOW-xp.exe
 
+      - name: Selftest 兼容层运行验证（门禁）
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath ".\HOW-xp.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if (Test-Path selftest-report.txt) { Get-Content selftest-report.txt }
+          exit $p.ExitCode
+
       - name: Package zip
         shell: pwsh
         run: |
@@ -77,14 +84,194 @@ jobs:
           Compress-Archive -Path $out -DestinationPath "$out.zip" -Force
           Get-ChildItem $out.zip
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: HOW-windows-xp
+          name: win-xp
           path: HOW-windows-xp.zip
 
-      - name: Upload zip to Releases (tag push only)
-        if: startsWith(github.ref, 'refs/tags/')
+  # ---------- HOW Runtime 核心逻辑（Linux 编译 + 单测） ----------
+  how-core-linux:
+    name: HOW Runtime core tests (Ubuntu x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build core test
+        run: |
+          gcc -O1 -Isrc -Ithird_party/miniz -o test_core scripts/test_core.c \
+            src/json.c src/abc.c \
+            third_party/miniz/miniz.c third_party/miniz/miniz_tdef.c \
+            third_party/miniz/miniz_tinfl.c third_party/miniz/miniz_zip.c
+
+      - name: Generate sample HAP
+        run: python3 tools/make_sample_hap.py
+
+      - name: Run tests
+        run: ./test_core | tee core-test.log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: how-core-ubuntu
+          path: |
+            test_core
+            core-test.log
+            samples/MyFirstDemo.hap
+
+  # ---------- 上游真实 Ark 运行时编译尝试（Ubuntu x64） ----------
+  ark-runtime:
+    name: Upstream Ark runtime (Ubuntu x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    continue-on-error: true
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ clang llvm python3
+
+      - name: Clone upstream repos
+        run: |
+          git clone --depth 1 https://github.com/OpenHarmony/arkcompiler_runtime_core.git
+          git clone --depth 1 https://github.com/OpenHarmony/arkcompiler_ets_runtime.git
+
+      - name: Build arkcompiler_runtime_core (CMake)
+        run: |
+          cd arkcompiler_runtime_core
+          (cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
+            && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
+          tail -20 ../log-core.txt || true
+
+      - name: Build arkcompiler_ets_runtime (ark.py x64.release)
+        run: |
+          cd arkcompiler_ets_runtime
+          (python3 ark.py x64.release || python3 build.py x64.release) 2>&1 | tee ../log-ets.txt || true
+          tail -20 ../log-ets.txt || true
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          mkdir -p out/bin out/log
+          find arkcompiler_runtime_core arkcompiler_ets_runtime -type f \
+            \( -name 'ark_*' -o -name 'libark*' -o -name 'vmexec' -o -name 'es2abc' \) \
+            -size -300M 2>/dev/null | head -40 | while read -r f; do
+              cp "$f" out/bin/ 2>/dev/null || true
+            done
+          cp log-core.txt log-ets.txt out/log/ 2>/dev/null || true
+          echo "binaries:"; ls -la out/bin | head -20
+          echo "logs:"; ls -la out/log
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ark-runtime-ubuntu
+          path: out/
+          if-no-files-found: ignore
+
+  # ---------- 真实渲染器（Skia，Rosen 同源后端）编译（Ubuntu x64） ----------
+  renderer-skia:
+    name: Skia renderer (Ubuntu x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    continue-on-error: true
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build python3 curl zip
+
+      - name: Clone Skia
+        run: git clone --depth 1 https://github.com/google/skia.git
+
+      - name: Sync dependencies
+        run: cd skia && python3 tools/git-sync-deps
+
+      - name: Generate & build libskia
+        run: |
+          cd skia
+          export PATH="$PWD/bin:$PATH"
+          gn gen out/min --args='is_official_build=false skia_use_expat=false \
+            skia_use_fontconfig=false skia_use_freetype=false skia_use_harfbuzz=false \
+            skia_use_icu=false skia_use_libjpeg_turbo=false skia_use_libpng=false \
+            skia_use_libwebp=false skia_use_zlib=false skia_use_dng_sdk=false \
+            skia_use_piex=false skia_enable_pdf=false skia_enable_skottie=false \
+            skia_enable_tools=false skia_use_gl=true skia_use_vulkan=false' 2>&1 | tee gen.log
+          ninja -C out/min skia 2>&1 | tee build.log
+
+      - name: Collect artifacts
+        if: always()
+        run: |
+          mkdir -p out/lib out/log
+          cp skia/out/min/libskia.a out/lib/ 2>/dev/null || true
+          (cd skia && git rev-parse HEAD > ../out/log/skia-revision.txt) 2>/dev/null || true
+          cp skia/gen.log skia/build.log out/log/ 2>/dev/null || true
+          ls -la out/lib out/log || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skia-ubuntu
+          path: out/
+          if-no-files-found: ignore
+
+  # ---------- Release：整合运行时与渲染器产物 ----------
+  release:
+    name: Release integrate (runtime + renderer bundles)
+    runs-on: ubuntu-latest
+    needs: [build-x64, build-xp, how-core-linux, ark-runtime, renderer-skia]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+
+      - name: Install zip
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Assemble bundles
+        run: |
+          set -e
+          echo "== downloaded artifacts =="
+          find art -maxdepth 2 -type f | head -40
+
+          # 1) Windows 宿主 zip（已含自测门禁）
+          cp "art/win-x64/HOW-windows-x64.zip" .
+          cp "art/win-xp/HOW-windows-xp.zip" .
+
+          # 2) Ark 运行时 bundle（上游真实编译产物 + HOW 核心单测）
+          mkdir -p bundle-ark/ark-runtime bundle-ark/how-core
+          cp -r art/ark-runtime-ubuntu/. bundle-ark/ark-runtime/ 2>/dev/null || true
+          cp -r art/how-core-ubuntu/.      bundle-ark/how-core/ 2>/dev/null || true
+          {
+            echo "# HOW Ark Runtime bundle (Ubuntu x64)"
+            echo ""
+            echo "- ark-runtime/: 上游 arkcompiler_runtime_core / arkcompiler_ets_runtime 编译尝试产物与日志"
+            echo "- how-core/: HOW Runtime 核心单测（Linux x64）与样例 HAP"
+          } > bundle-ark/README-BUNDLE.md
+          (cd bundle-ark && zip -qr ../HOW-ark-runtime-ubuntu-x64.zip .)
+
+          # 3) 渲染器 bundle（Skia 静态库）
+          mkdir -p bundle-skia
+          cp -r art/skia-ubuntu/. bundle-skia/ 2>/dev/null || true
+          {
+            echo "# HOW Skia renderer bundle (Ubuntu x64)"
+            echo ""
+            echo "- libskia.a: 上游 Skia（OpenHarmony Rosen 同源渲染后端）静态库"
+            echo "- log/: 构建日志与源码版本"
+          } > bundle-skia/README-BUNDLE.md
+          (cd bundle-skia && zip -qr ../HOW-skia-renderer-ubuntu-x64.zip .)
+
+          ls -la *.zip
+
+      - name: Upload to Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: HOW-windows-xp.zip
+          files: |
+            HOW-windows-x64.zip
+            HOW-windows-xp.zip
+            HOW-ark-runtime-ubuntu-x64.zip
+            HOW-skia-renderer-ubuntu-x64.zip
+          generate_release_notes: true

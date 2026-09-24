@@ -177,6 +177,9 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show) {
     (void)hPrev; (void)cmd;
+    /* 无界面自测模式：HOW.exe --selftest（CI 兼容层运行验证门禁） */
+    if (wcsstr(GetCommandLineW(), L"--selftest"))
+        return run_selftest(hInst);
     WNDCLASSW wc;
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = main_proc;

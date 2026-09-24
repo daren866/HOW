@@ -39,10 +39,30 @@ HAP 包 (zip)
 
 ### GitHub Actions（推荐）
 
-| 工作流 | 触发 | 产物 |
+`windows-build.yml` 一条流水线完成 **Windows 打包 → 自测门禁 → 运行时/渲染器编译 → Release 整合**：
+
+| Job | Runner | 内容 |
 |---|---|---|
-| `windows-build.yml` | push main / tag `v*` / 手动 | `HOW-windows-x64.zip`（MSVC x64）与 `HOW-windows-xp.zip`（MinGW PE32，子系统 5.01，兼容 WinXP）自动上传到 Releases |
-| `ark-runtime.yml` | 手动 / 每周巡检 | 上游真实 `arkcompiler_ets_runtime` 与 `arkcompiler_runtime_core` 的 x64 构建尝试与日志 |
+| `build-x64` | windows | MINGW64 编译 HOW.exe → `HOW.exe --selftest` 兼容层运行验证（门禁） → 打包 zip |
+| `build-xp` | windows | MINGW32 编译 XP 兼容版（PE32, 子系统 5.01）→ 同样自测门禁 → 打包 zip |
+| `how-core-linux` | ubuntu | HOW Runtime 核心单测（.abc 解析 / HOWVM / JSON5，18 项断言） |
+| `ark-runtime` | ubuntu（tag/手动） | **真实上游编译尝试**：`arkcompiler_runtime_core` CMake 构建 + `arkcompiler_ets_runtime` `ark.py x64.release`，收集 `ark_*`/`libark*`/`vmexec` 等产物与日志 |
+| `renderer-skia` | ubuntu（tag/手动） | **真实渲染器编译**：上游 Skia（OpenHarmony Rosen 同源后端）GN+Ninja 构建 `libskia.a` |
+| `release` | ubuntu（仅 tag） | 整合 4 个 zip 上传 Releases：`HOW-windows-x64.zip`、`HOW-windows-xp.zip`、`HOW-ark-runtime-ubuntu-x64.zip`（运行时产物+核心单测）、`HOW-skia-renderer-ubuntu-x64.zip`（渲染器静态库+日志） |
+
+> 上游编译为尽力而为（continue-on-error）：产物与完整日志均随 bundle 上传，用于评估 Windows x64 移植可行性。
+
+### 兼容层运行验证（selftest 门禁）
+
+`HOW.exe --selftest` 在无界面模式下验证完整链路，任一环节失败则 CI 不出包：
+
+```
+定位样例 HAP → hap_probe 解析 app.json5 → store_install 解压安装
+→ store_list 清单扫描 → abc_load 解析 PACA 容器 → HOWVM 执行 onPlus（count==3）
+→ rt_load_ui 声明式组件树 → ui_render GDI 布局+绘制 → 隐藏兼容层窗口 WM_PAINT 全链路
+```
+
+结果写入 `selftest-report.txt`（exe 同目录），本地也可直接运行验证。
 
 ### 本机构建
 
@@ -85,9 +105,11 @@ src/
  ├─ ui_render.c   Flex 布局 + GDI 双缓冲渲染 + 命中测试与动作执行
  ├─ abc.c         Panda .abc 容器解析 + HOWVM 虚拟机
  ├─ json.c        JSON5 宽松解析器
+ ├─ selftest.c    --selftest 无界面自测（CI 兼容层运行门禁）
  └─ how.h/howcore.h
-third_party/miniz/  公共领域 zip 读写库（解压 HAP）
+third_party/miniz/       公共领域 zip 读写库（解压 HAP）
 samples/MyFirstDemo.hap  示例应用（含真实 PACA 头 .abc + HOWVM 字节码）
+scripts/Makefile.mingw   MinGW 构建（Windows 本机 / MSYS2 / 交叉）
 scripts/test_core.c      核心层 Linux 单测（18 项断言）
 tools/make_sample_hap.py 样例 HAP 生成器
 ```

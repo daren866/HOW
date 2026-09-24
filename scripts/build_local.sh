@@ -7,7 +7,7 @@ DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$DIR/HOW.exe}"
 
 SRCS="$DIR/src/main.c $DIR/src/compat.c $DIR/src/ui_parse.c $DIR/src/ui_render.c \
-$DIR/src/store.c $DIR/src/abc.c $DIR/src/json.c \
+$DIR/src/store.c $DIR/src/abc.c $DIR/src/json.c $DIR/src/selftest.c \
 $DIR/third_party/miniz/miniz.c $DIR/third_party/miniz/miniz_tdef.c \
 $DIR/third_party/miniz/miniz_tinfl.c $DIR/third_party/miniz/miniz_zip.c"
 

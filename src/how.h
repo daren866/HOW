@@ -94,4 +94,7 @@ void     rt_set_toast(RtState *rt, const char *msgU8);
 void compat_register(HINSTANCE hInst);
 void compat_open(HINSTANCE hInst, AppInfo *app);
 
+/* ---------------- 自测（--selftest） ---------------- */
+int run_selftest(HINSTANCE hInst);
+
 #endif

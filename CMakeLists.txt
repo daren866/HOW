@@ -9,6 +9,7 @@ add_executable(HOW WIN32
     src/store.c
     src/abc.c
     src/json.c
+    src/selftest.c
     third_party/miniz/miniz.c
     third_party/miniz/miniz_tdef.c
     third_party/miniz/miniz_tinfl.c

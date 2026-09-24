@@ -10,7 +10,7 @@ XP      ?= 0
 ROOT     = $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..
 
 SRC = src/main.c src/compat.c src/ui_parse.c src/ui_render.c src/store.c \
-      src/abc.c src/json.c \
+      src/abc.c src/json.c src/selftest.c \
       third_party/miniz/miniz.c third_party/miniz/miniz_tdef.c \
       third_party/miniz/miniz_tinfl.c third_party/miniz/miniz_zip.c
 INC = -Isrc -Ithird_party/miniz
@@ -25,9 +25,9 @@ LDFLAGS += -Wl,--major-os-version,5,--minor-os-version,1 \
 endif
 
 $(HOW): $(SRC) src/how.h src/howcore.h
-	$(CC) $(SRC) $(INC) $(CFLAGS) $(LDFLAGS) -o $@
+        $(CC) $(SRC) $(INC) $(CFLAGS) $(LDFLAGS) -o $@
 
 clean:
-	rm -f $(HOW)
+        rm -f $(HOW)
 
 .PHONY: clean
