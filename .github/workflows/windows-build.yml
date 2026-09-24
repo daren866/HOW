@@ -141,14 +141,25 @@ jobs:
         run: |
           cd arkcompiler_runtime_core
           (cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
+            -DPANDA_ENABLE_CLANG_TIDY=false \
             && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
           tail -20 ../log-core.txt || true
 
-      - name: Build arkcompiler_ets_runtime (ark.py x64.release)
+      - name: Build arkcompiler_ets_runtime (standalone attempt)
         run: |
           cd arkcompiler_ets_runtime
-          (python3 ark.py x64.release || python3 build.py x64.release) 2>&1 | tee ../log-ets.txt || true
-          tail -20 ../log-ets.txt || true
+          ls -la | tee ../log-ets-tree.txt || true
+          for s in ark.py build_etc.py build.py; do
+            if [ -f "$s" ]; then
+              echo "== entry: $s ==" | tee -a ../log-ets.txt
+              python3 "$s" x64.release 2>&1 | tee -a ../log-ets.txt || true
+              break
+            fi
+          done
+          if [ -f x64/build.sh ]; then
+            bash x64/build.sh 2>&1 | tee ../log-ets-x64.txt || true
+          fi
+          tail -20 ../log-ets.txt 2>/dev/null || tail -20 ../log-ets-x64.txt 2>/dev/null || true
 
       - name: Collect artifacts
         if: always()
@@ -192,12 +203,7 @@ jobs:
         run: |
           cd skia
           export PATH="$PWD/bin:$PATH"
-          gn gen out/min --args='is_official_build=false skia_use_expat=false \
-            skia_use_fontconfig=false skia_use_freetype=false skia_use_harfbuzz=false \
-            skia_use_icu=false skia_use_libjpeg_turbo=false skia_use_libpng=false \
-            skia_use_libwebp=false skia_use_zlib=false skia_use_dng_sdk=false \
-            skia_use_piex=false skia_enable_pdf=false skia_enable_skottie=false \
-            skia_enable_tools=false skia_use_gl=true skia_use_vulkan=false' 2>&1 | tee gen.log
+          gn gen out/min --args='is_official_build=false skia_use_expat=false skia_use_fontconfig=false skia_use_freetype=false skia_use_harfbuzz=false skia_use_icu=false skia_use_libjpeg_turbo=false skia_use_libpng=false skia_use_libwebp=false skia_use_zlib=false skia_use_dng_sdk=false skia_use_piex=false skia_enable_pdf=false skia_enable_skottie=false skia_enable_tools=false skia_use_gl=true skia_use_vulkan=false' 2>&1 | tee gen.log
           ninja -C out/min skia 2>&1 | tee build.log
 
       - name: Collect artifacts
