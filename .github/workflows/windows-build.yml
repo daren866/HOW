@@ -142,11 +142,33 @@ jobs:
           git clone --depth 1 https://github.com/OpenHarmony/arkcompiler_runtime_core.git
           git clone --depth 1 https://github.com/OpenHarmony/arkcompiler_ets_runtime.git
 
+      - name: Pre-fetch third-party deps (manifest driven)
+        run: |
+          cd arkcompiler_runtime_core
+          D=ark-third-party
+          mkdir -p "$D"
+          while IFS=, read -r name repo ctype cid pmode smode; do
+            case "$name" in ''|\#*) continue;; esac
+            name=$(echo "$name" | xargs)
+            [ -z "$name" ] && continue
+            [ -d "$D/$name/.git" ] && continue
+            echo "== $name <- $repo ($ctype $cid)"
+            case "$ctype" in
+              branch|tag)
+                git clone -q --depth 1 --branch "$cid" "$repo" "$D/$name" || echo "clone $name FAILED"
+                ;;
+              commit)
+                git init -q "$D/$name"
+                git -C "$D/$name" fetch -q --depth 1 "$repo" "$cid" || echo "fetch $name FAILED"
+                git -C "$D/$name" checkout -q FETCH_HEAD || true
+                ;;
+            esac
+          done < scripts/third-party-lists/public
+          ls "$D"
+
       - name: Build arkcompiler_runtime_core (CMake)
         run: |
           cd arkcompiler_runtime_core
-          # 上游 master 缺失 patches 目录时，空目录即可让 install-third-party 继续（无补丁应用）
-          mkdir -p patches/asmjit patches/elfio patches/vixl patches/zydis
           (cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
             -DPANDA_ENABLE_CLANG_TIDY=false \
             && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
