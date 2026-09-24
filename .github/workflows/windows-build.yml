@@ -31,7 +31,10 @@ jobs:
         shell: pwsh
         run: |
           $p = Start-Process -FilePath ".\HOW.exe" -ArgumentList "--selftest" -Wait -PassThru
+          Write-Host "selftest exit code: $($p.ExitCode)"
+          Get-ChildItem -Filter selftest-report.txt -ErrorAction SilentlyContinue | Format-List FullName,Length
           if (Test-Path selftest-report.txt) { Get-Content selftest-report.txt }
+          else { Write-Host "!! selftest-report.txt 未生成"; Get-ChildItem | Format-Table Name }
           exit $p.ExitCode
 
       - name: Package zip
@@ -70,10 +73,12 @@ jobs:
         shell: pwsh
         run: |
           $p = Start-Process -FilePath ".\HOW-xp.exe" -ArgumentList "--selftest" -Wait -PassThru
+          Write-Host "selftest exit code: $($p.ExitCode)"
           if (Test-Path selftest-report.txt) { Get-Content selftest-report.txt }
+          else { Write-Host "!! selftest-report.txt 未生成" }
           exit $p.ExitCode
 
-      - name: Package zip
+      - name: Package zip (XP)
         shell: pwsh
         run: |
           $out = "HOW-windows-xp"
@@ -140,37 +145,47 @@ jobs:
       - name: Build arkcompiler_runtime_core (CMake)
         run: |
           cd arkcompiler_runtime_core
+          # 上游 master 缺失 patches 目录时，空目录即可让 install-third-party 继续（无补丁应用）
+          mkdir -p patches/asmjit patches/elfio patches/vixl patches/zydis
           (cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
             -DPANDA_ENABLE_CLANG_TIDY=false \
             && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
-          tail -20 ../log-core.txt || true
+          tail -25 ../log-core.txt || true
 
-      - name: Build arkcompiler_ets_runtime (standalone attempt)
+      - name: Build arkcompiler_ets_runtime (OHOS build system attempt)
         run: |
           cd arkcompiler_ets_runtime
-          ls -la | tee ../log-ets-tree.txt || true
-          for s in ark.py build_etc.py build.py; do
-            if [ -f "$s" ]; then
-              echo "== entry: $s ==" | tee -a ../log-ets.txt
-              python3 "$s" x64.release 2>&1 | tee -a ../log-ets.txt || true
-              break
+          ls -la | tee ../log-ets-tree.txt
+          if [ ! -f build.sh ]; then
+            echo "== ets_runtime 独立构建需完整 OpenHarmony 源码树，尝试 group 过滤的 repo sync ==" | tee ../log-ets.txt
+            sudo apt-get install -y repo || true
+            mkdir -p ../ohos && cd ../ohos
+            (repo init -u https://gitee.com/openharmony/manifest.git -b master --depth 1 -g default,arkcompiler 2>&1 || true) | tee -a ../HOW/log-ets.txt
+            (repo sync -c -j4 --no-tags 2>&1 || true) | tee -a ../HOW/log-ets.txt
+            ls | tee -a ../HOW/log-ets.txt || true
+            if [ -f build.sh ]; then
+              echo "== prebuilts_download ==" | tee -a ../HOW/log-ets.txt
+              (bash build/prebuilts_download.sh 2>&1 || true) | tee -a ../HOW/log-ets.txt
+              echo "== build.sh ark_js_host_linux_tools_packages ==" | tee -a ../HOW/log-ets.txt
+              (bash build.sh --product-name hispark_taurus_standard --build-target ark_js_host_linux_tools_packages 2>&1 || true) | tee -a ../HOW/log-ets.txt
+              find out -name 'ark_js_vm' -o -name '*.abc' 2>/dev/null | head -10 | tee -a ../HOW/log-ets.txt || true
+            else
+              echo "repo sync 后仍无 build.sh" | tee -a ../HOW/log-ets.txt
             fi
-          done
-          if [ -f x64/build.sh ]; then
-            bash x64/build.sh 2>&1 | tee ../log-ets-x64.txt || true
           fi
-          tail -20 ../log-ets.txt 2>/dev/null || tail -20 ../log-ets-x64.txt 2>/dev/null || true
+          tail -20 ../HOW/log-ets.txt 2>/dev/null || true
 
       - name: Collect artifacts
         if: always()
         run: |
           mkdir -p out/bin out/log
-          find arkcompiler_runtime_core arkcompiler_ets_runtime -type f \
-            \( -name 'ark_*' -o -name 'libark*' -o -name 'vmexec' -o -name 'es2abc' \) \
-            -size -300M 2>/dev/null | head -40 | while read -r f; do
+          find arkcompiler_runtime_core -type f -executable \
+            \( -name 'ark_*' -o -name 'pandasm' -o -name 'paoc' -o -name 'verifier' \
+               -o -name 'libark*' \) -size -300M 2>/dev/null \
+            | grep -v '\.cpp$' | head -40 | while read -r f; do
               cp "$f" out/bin/ 2>/dev/null || true
             done
-          cp log-core.txt log-ets.txt out/log/ 2>/dev/null || true
+          cp log-*.txt out/log/ 2>/dev/null || true
           echo "binaries:"; ls -la out/bin | head -20
           echo "logs:"; ls -la out/log
 
@@ -203,7 +218,7 @@ jobs:
         run: |
           cd skia
           export PATH="$PWD/bin:$PATH"
-          gn gen out/min --args='is_official_build=false skia_use_expat=false skia_use_fontconfig=false skia_use_freetype=false skia_use_harfbuzz=false skia_use_icu=false skia_use_libjpeg_turbo=false skia_use_libpng=false skia_use_libwebp=false skia_use_zlib=false skia_use_dng_sdk=false skia_use_piex=false skia_enable_pdf=false skia_enable_skottie=false skia_enable_tools=false skia_use_gl=true skia_use_vulkan=false' 2>&1 | tee gen.log
+          gn gen out/min --args='is_official_build=false skia_use_expat=false skia_use_fontconfig=false skia_use_freetype=false skia_use_harfbuzz=false skia_use_icu=false skia_use_libjpeg_turbo=false skia_use_libpng=false skia_use_libwebp=false skia_use_zlib=false skia_use_dng_sdk=false skia_use_piex=false skia_enable_pdf=false skia_enable_skottie=false skia_enable_tools=false skia_use_gl=false skia_use_vulkan=false skia_enable_ganesh=false' 2>&1 | tee gen.log
           ninja -C out/min skia 2>&1 | tee build.log
 
       - name: Collect artifacts

@@ -9,7 +9,23 @@ static FILE *g_rep;
 static int g_fail, g_pass;
 
 static void rep_line(const char *tag, const char *name) {
-    if (g_rep) fprintf(g_rep, "[%s] %s\n", tag, name);
+    if (g_rep) {
+        fprintf(g_rep, "[%s] %s\n", tag, name);
+        fflush(g_rep);
+    }
+}
+
+static FILE *open_report(const wchar_t *exedir, const wchar_t *cwd) {
+    wchar_t p[1100];
+    FILE *f;
+    _snwprintf(p, 1100, L"%s\\selftest-report.txt", exedir);
+    f = _wfopen(p, L"wb");
+    if (!f) {
+        _snwprintf(p, 1100, L"%s\\selftest-report.txt", cwd);
+        f = _wfopen(p, L"wb");
+    }
+    if (f) setvbuf(f, NULL, _IONBF, 0);
+    return f;
 }
 
 #define CHECK(cond, name) do { \
@@ -44,10 +60,9 @@ int run_selftest(HINSTANCE hInst) {
         if (cut) *cut = 0;
     }
     GetCurrentDirectoryW(1024, cwd);
-    wchar_t repPath[1100];
-    _snwprintf(repPath, 1100, L"%s\\selftest-report.txt", exedir);
-    g_rep = _wfopen(repPath, L"wb");
+    g_rep = open_report(exedir, cwd);
     if (g_rep) fprintf(g_rep, "HOW Runtime selftest\n====================\n");
+    if (g_rep) fprintf(g_rep, "exe_dir: %ls\ncwd: %ls\n", exedir, cwd);
 
     /* 1. 定位样例 HAP */
     wchar_t hap[1024];
