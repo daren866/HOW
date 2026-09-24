@@ -1,0 +1,86 @@
+name: Windows Build & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-x64:
+    name: Windows x64 (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (Visual Studio 2022, x64)
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $out = "HOW-windows-x64"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item build\Release\HOW.exe $out\
+          Copy-Item samples\MyFirstDemo.hap $out\
+          Copy-Item README.md,LICENSE $out\
+          Compress-Archive -Path $out -DestinationPath "$out.zip" -Force
+          Get-ChildItem $out.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HOW-windows-x64
+          path: HOW-windows-x64.zip
+
+      - name: Upload zip to Releases (tag push only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: HOW-windows-x64.zip
+          generate_release_notes: true
+
+  build-xp:
+    name: Windows XP 兼容 (MinGW32)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: false
+          install: mingw-w64-i686-gcc make
+
+      - name: Build (PE32, subsystem 5.01)
+        shell: msys2 {0}
+        run: make -f scripts/Makefile.mingw XP=1 CC=gcc HOW=HOW-xp.exe
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $out = "HOW-windows-xp"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item HOW-xp.exe $out\HOW.exe
+          Copy-Item samples\MyFirstDemo.hap $out\
+          Copy-Item README.md,LICENSE $out\
+          Compress-Archive -Path $out -DestinationPath "$out.zip" -Force
+          Get-ChildItem $out.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HOW-windows-xp
+          path: HOW-windows-xp.zip
+
+      - name: Upload zip to Releases (tag push only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: HOW-windows-xp.zip

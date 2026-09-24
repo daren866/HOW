@@ -1,0 +1,33 @@
+# Makefile.mingw - MinGW-w64 本机构建（Windows / MSYS2）与交叉构建两用
+# 用法:
+#   make -f scripts/Makefile.mingw                 # 默认 mingw 交叉工具链
+#   make -f scripts/Makefile.mingw CC=gcc          # MSYS2 本机
+#   make -f scripts/Makefile.mingw XP=1 HOW=HOW-xp.exe CC=gcc   # XP 兼容构建
+
+CC      ?= i686-w64-mingw32-gcc
+HOW     ?= HOW.exe
+XP      ?= 0
+ROOT     = $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..
+
+SRC = src/main.c src/compat.c src/ui_parse.c src/ui_render.c src/store.c \
+      src/abc.c src/json.c \
+      third_party/miniz/miniz.c third_party/miniz/miniz_tdef.c \
+      third_party/miniz/miniz_tinfl.c third_party/miniz/miniz_zip.c
+INC = -Isrc -Ithird_party/miniz
+CFLAGS  = -O2 -s -static -static-libgcc -fno-stack-protector \
+          -DUNICODE -D_UNICODE -Wall
+LDFLAGS = -mwindows -luser32 -lgdi32 -lcomdlg32 -static
+
+ifeq ($(XP),1)
+CFLAGS  += -D_WIN32_WINNT=0x0501 -DWINVER=0x0501
+LDFLAGS += -Wl,--major-os-version,5,--minor-os-version,1 \
+           -Wl,--major-subsystem-version,5,--minor-subsystem-version,1
+endif
+
+$(HOW): $(SRC) src/how.h src/howcore.h
+	$(CC) $(SRC) $(INC) $(CFLAGS) $(LDFLAGS) -o $@
+
+clean:
+	rm -f $(HOW)
+
+.PHONY: clean
