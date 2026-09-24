@@ -139,7 +139,8 @@ jobs:
 
       - name: Clone upstream repos
         run: |
-          git clone --depth 1 https://github.com/OpenHarmony/arkcompiler_runtime_core.git
+          # runtime_core 用 v4.1-Release：该版本保留可用的独立 CMake 构建（master 已转向 GN）
+          git clone --depth 1 --branch OpenHarmony-v4.1-Release https://github.com/OpenHarmony/arkcompiler_runtime_core.git
           git clone --depth 1 https://github.com/OpenHarmony/arkcompiler_ets_runtime.git
 
       - name: Pre-fetch third-party deps (manifest driven)
@@ -152,6 +153,8 @@ jobs:
             name=$(echo "$name" | xargs)
             [ -z "$name" ] && continue
             [ -d "$D/$name/.git" ] && continue
+            # git.linaro.org 不稳定，换 GitHub 官方镜像
+            case "$repo" in *git.linaro.org*) repo="https://github.com/Linaro/vixl.git";; esac
             echo "== $name <- $repo ($ctype $cid)"
             case "$ctype" in
               branch|tag)
