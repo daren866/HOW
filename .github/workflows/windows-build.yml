@@ -135,7 +135,7 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov
+          sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov gdb
 
       - name: Clone upstream repos
         run: |
