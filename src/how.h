@@ -66,6 +66,8 @@ struct RtState {
     Var vars[24];
     int nvars;
     AbcInfo abc;
+    int     engine;             /* HowEngine：当前兼容层引擎 */
+    wchar_t engineTag[96];      /* 工具栏徽标文字 */
     wchar_t toast[256];
     int toastOn;
     DWORD toastTick;
@@ -89,6 +91,20 @@ void     ui_render(RtState *rt, HDC hdc, RECT rcPage);      /* GDI 双缓冲软�
 HFONT    rt_getfont(RtState *rt, int size, int bold);
 const wchar_t *rt_logbuf(RtState *rt);
 void     rt_set_toast(RtState *rt, const char *msgU8);
+
+/* ---------------- 真 Ark 运行时接入层（上游 arkcompiler 真编译产物） ---------------- */
+typedef enum { ENG_HOWVM = 0, ENG_ARK_NATIVE = 1, ENG_ARK_WSL = 2 } HowEngine;
+
+typedef struct {
+    HowEngine type;
+    wchar_t   exePath[1024];   /* 真运行时入口可执行文件 */
+    wchar_t   detail[192];     /* 来源描述（徽标悬浮/日志用） */
+} ArkRtProbe;
+
+int            arkrt_probe(ArkRtProbe *out);   /* 1=发现真运行时组件 */
+int            arkrt_exec(ArkRtProbe *p, const wchar_t *abcPathW,
+                          char *outBuf, int outCap); /* 真实执行，返回进程退出码 */
+const wchar_t *arkrt_engine_name(HowEngine t); /* 引擎徽标显示名 */
 
 /* ---------------- 兼容层窗口 ---------------- */
 void compat_register(HINSTANCE hInst);

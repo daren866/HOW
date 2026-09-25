@@ -7,7 +7,8 @@
 
 static const wchar_t WC_COMPAT[] = L"HOW_COMPAT_WND";
 
-static void draw_toolbar(HDC hdc, RECT rcT, const wchar_t *title) {
+static void draw_toolbar(HDC hdc, RECT rcT, const wchar_t *title,
+                         const wchar_t *engineTag) {
     HBRUSH br = CreateSolidBrush(RGB(0x18, 0x24, 0x31));
     FillRect(hdc, &rcT, br);
     DeleteObject(br);
@@ -35,7 +36,8 @@ static void draw_toolbar(HDC hdc, RECT rcT, const wchar_t *title) {
     SelectObject(hdc, f2);
     RECT gr = rcT;
     gr.right -= 14;
-    DrawTextW(hdc, L"HOW Runtime · GDI \u8f6f\u6e32\u67d3", -1, &gr,
+    /* 右侧引擎徽标：真 Ark 运行时 / HOWVM */
+    DrawTextW(hdc, engineTag ? engineTag : L"HOW Runtime", -1, &gr,
               DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     SelectObject(hdc, of);
     DeleteObject(f);
@@ -109,7 +111,7 @@ static LRESULT CALLBACK compat_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         RECT rcLog = {0, ph - LOG_H, pw, ph};
         wchar_t title[192];
         GetWindowTextW(hwnd, title, 192);
-        draw_toolbar(mem, rcT, title);
+        draw_toolbar(mem, rcT, title, rt->engineTag[0] ? rt->engineTag : NULL);
         ui_render(rt, mem, rcPage);
         draw_logpane(mem, rcLog, rt);
         BitBlt(hdc, 0, 0, pw, ph, mem, 0, 0, SRCCOPY);
@@ -199,6 +201,49 @@ void compat_open(HINSTANCE hInst, AppInfo *app) {
     }
     rt_log(rt, "[render] \u540e\u7aef: GDI \u53cc\u7f13\u51b2\u8f6f\u6e32\u67d3 \u00b7 Flex \u5e03\u5c40\u5f15\u64ce");
     rt_log(rt, "[input] \u4e8b\u4ef6\u94fe: WM_LBUTTONUP -> ui_click \u547d\u4e2d\u5206\u53d1");
+
+    /* 真 Ark 运行时接入：探测 zip 内 ark/ 真编译组件，可用则真实执行 modules.abc */
+    {
+        ArkRtProbe ap;
+        int hasReal = arkrt_probe(&ap);
+        rt->engine = (int)ap.type;
+        _snwprintf(rt->engineTag, 96, L"%s", arkrt_engine_name(ap.type));
+        if (hasReal) {
+            rt_log(rt, "[arkrt] 发现真 Ark 运行时组件: %ls", ap.exePath);
+            wchar_t abcW[1024];
+            _snwprintf(abcW, 1024, L"%s\\%s\\ets\\modules.abc", apps, dirW);
+            char outb[4096];
+            int erc = arkrt_exec(&ap, abcW, outb, 4096);
+            if (erc >= 0) {
+                rt_log(rt, "[arkrt] 上游 ark_js_vm 真实加载执行 modules.abc · 退出码 %d", erc);
+                /* 输出前 3 行写进日志面板（真实执行证据） */
+                char *line = outb;
+                int shown = 0;
+                for (char *q = outb; *q && shown < 3; q++) {
+                    if (*q == '\n' || *(q + 1) == 0) {
+                        int len = (int)(q - line) + (*q != '\n' ? 1 : 0);
+                        if (len > 0) {
+                            char tmp[256];
+                            int cp = len > 200 ? 200 : len;
+                            memcpy(tmp, line, (size_t)cp);
+                            tmp[cp] = 0;
+                            for (char *t = tmp; *t; t++) if (*t == '\r') *t = ' ';
+                            rt_log(rt, "[arkvm] %s", tmp);
+                            shown++;
+                        }
+                        line = q + 1;
+                    }
+                }
+            } else {
+                rt_log(rt, "[arkrt] 真运行时启动失败(%d) —— UI 动作由 HOWVM 引擎继续承担", erc);
+                _snwprintf(rt->engineTag, 96, L"%s", arkrt_engine_name(ENG_HOWVM));
+                rt->engine = (int)ENG_HOWVM;
+            }
+        } else {
+            rt_log(rt, "[arkrt] 未发现 ark/ 真运行时组件，使用内置 HOWVM 引擎");
+            _snwprintf(rt->engineTag, 96, L"%s", arkrt_engine_name(ENG_HOWVM));
+        }
+    }
 
     /* 竖屏窗口（手机形态），限制在可视工作区内 */
     RECT wa;

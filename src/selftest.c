@@ -176,6 +176,40 @@ int run_selftest(HINSTANCE hInst) {
         }
     }
 
+    /* 8. 真 Ark 运行时接入层：探测 ark/ 真编译组件 + 真实执行 */
+    {
+        ArkRtProbe ap;
+        int has = arkrt_probe(&ap);
+        if (has) {
+            CHECK(ap.type == ENG_ARK_NATIVE || ap.type == ENG_ARK_WSL,
+                  "arkrt_probe: 发现真 Ark 运行时组件(ark/)");
+            if (hit >= 0) {
+                wchar_t appsdir[512], dirW[160], abcW[1024];
+                store_apps_dir(appsdir, 512);
+                u8w(apps[hit].dir, dirW, 160);
+                _snwprintf(abcW, 1024, L"%s\\%s\\ets\\modules.abc", appsdir, dirW);
+                char outb[4096];
+                int erc = arkrt_exec(&ap, abcW, outb, 4096);
+                /* >=0 = 进程已真实启动并退出（退出码任意），<0 = 未启动/超时 */
+                CHECK(erc >= 0, "arkrt_exec: 真 ark_js_vm 进程已实际启动");
+                if (erc >= 0) {
+                    char brief[256];
+                    int k = 0;
+                    for (; outb[k] && k < 160 && outb[k] != '\n'; k++)
+                        brief[k] = (outb[k] == '\r') ? ' ' : outb[k];
+                    brief[k] = 0;
+                    char info[320];
+                    _snprintf(info, sizeof(info),
+                              "arkrt_exec: rc=%d out: %s", erc, brief);
+                    rep_line("INFO", info);
+                }
+            }
+        } else {
+            CHECK(ap.type == ENG_HOWVM,
+                  "arkrt_probe: 无 ark/ 组件时安全回退 HOWVM");
+        }
+    }
+
     if (g_rep)
         fprintf(g_rep, "\nRESULT: %s (pass=%d fail=%d)\n",
                 g_fail ? "FAIL" : "PASS", g_pass, g_fail);

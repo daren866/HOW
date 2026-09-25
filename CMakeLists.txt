@@ -4,6 +4,7 @@ project(HOW C)
 add_executable(HOW WIN32
     src/main.c
     src/compat.c
+    src/arkrt.c
     src/ui_parse.c
     src/ui_render.c
     src/store.c

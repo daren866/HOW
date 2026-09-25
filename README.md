@@ -46,11 +46,26 @@ HAP 包 (zip)
 | `build-x64` | windows | MINGW64 编译 HOW.exe → `HOW.exe --selftest` 兼容层运行验证（门禁） → 打包 zip |
 | `build-xp` | windows | MINGW32 编译 XP 兼容版（PE32, 子系统 5.01）→ 同样自测门禁 → 打包 zip |
 | `how-core-linux` | ubuntu | HOW Runtime 核心单测（.abc 解析 / HOWVM / JSON5，18 项断言） |
-| `ark-runtime` | ubuntu（tag/手动） | **真实上游编译尝试**：`arkcompiler_runtime_core` CMake 构建 + `arkcompiler_ets_runtime` `ark.py x64.release`，收集 `ark_*`/`libark*`/`vmexec` 等产物与日志 |
+| `ark-runtime` | ubuntu（tag/手动） | **真实上游编译**：OHOS repo sync 依赖子集同步 + `how_ark_mini` 迷你产品单模块编译（`--build-target ark_js_host_linux_tools_packages`，只编译需要的模块，ninja 2068 步实测通过），产出 `ark_js_vm`/`es2abc`/`libark_jsruntime.so` 等宿主工具 |
+| `ark-runtime-windows` | windows（tag/手动） | **真 Ark 运行时 Windows 原生编译尝试**：`arkcompiler_runtime_core` v4.1 CMake（MSVC），成功则产出 `ark_*.exe` 原生工具 |
 | `renderer-skia` | ubuntu（tag/手动） | **真实渲染器编译**：上游 Skia（OpenHarmony Rosen 同源后端）GN+Ninja 构建 `libskia.a` |
-| `release` | ubuntu（仅 tag） | 整合 4 个 zip 上传 Releases：`HOW-windows-x64.zip`、`HOW-windows-xp.zip`、`HOW-ark-runtime-ubuntu-x64.zip`（运行时产物+核心单测）、`HOW-skia-renderer-ubuntu-x64.zip`（渲染器静态库+日志） |
+| `release` | ubuntu（仅 tag） | 整合 4 个 zip 上传 Releases；并将真运行时组件注入 `HOW-windows-x64.zip` 的 `ark/windows/`（原生）与 `ark/linux/`（WSL 通路）目录 |
 
 > 上游编译为尽力而为（continue-on-error）：产物与完整日志均随 bundle 上传，用于评估 Windows x64 移植可行性。
+
+### 真 Ark 运行时接入（双引擎）
+
+兼容层窗口启动时（`src/arkrt.c`）按顺序探测 Release zip 内 `ark/` 目录的上游真编译产物，并**真实启动进程执行 hap 的 `modules.abc`**：
+
+```
+1. ark/windows/ark_js_vm.exe 存在      → 直接 CreateProcess 执行（Windows 原生引擎）
+2. ark/linux/ark_js_vm 存在 + WSL 可用 → 经 wsl.exe 执行（LD_LIBRARY_PATH 指向同目录依赖）
+3. 均不可用                            → 内置 HOWVM 引擎兜底（纯原生，无外部依赖）
+```
+
+当前引擎显示在兼容层窗口工具栏徽标（真 Ark 运行时 / HOW Runtime · HOWVM 引擎），
+探测与真实执行证据（含上游运行时 stdout）输出在窗口底部日志面板。
+执行失败/超时（20s）自动回退 HOWVM，UI 动作链路永不阻塞。
 
 ### 兼容层运行验证（selftest 门禁）
 
@@ -60,6 +75,7 @@ HAP 包 (zip)
 定位样例 HAP → hap_probe 解析 app.json5 → store_install 解压安装
 → store_list 清单扫描 → abc_load 解析 PACA 容器 → HOWVM 执行 onPlus（count==3）
 → rt_load_ui 声明式组件树 → ui_render GDI 布局+绘制 → 隐藏兼容层窗口 WM_PAINT 全链路
+→ arkrt_probe 真 Ark 运行时接入层（有组件则真实执行，无组件安全回退 HOWVM）
 ```
 
 结果写入 `selftest-report.txt`（exe 同目录），本地也可直接运行验证。
