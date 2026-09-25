@@ -139,7 +139,7 @@ jobs:
           # 其余为 build/tools_checker.py 要求的系统工具（消除 Missing dependencies）
           sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov gdb \
             ccache default-jdk libtinfo5 genext2fs u-boot-tools mtools mtd-utils scons \
-            gcc-arm-none-eabi
+            gcc-arm-none-eabi ruby
 
       - name: Clone arkcompiler_runtime_core (v4.1, CMake-able)
         run: |
@@ -227,7 +227,9 @@ jobs:
               commonlibrary_c_utils \
               third_party_icu third_party_zlib third_party_libuv third_party_protobuf \
               third_party_cJSON third_party_json third_party_bounds_checking_function \
-              global_i18n hiviewdfx_hilog resourceschedule_qos_manager \
+              third_party_abseil-cpp third_party_googletest third_party_pcre2 \
+              third_party_flatbuffers global_i18n hiviewdfx_hilog \
+              resourceschedule_qos_manager testfwk_developer_test \
               > sync-detail.log 2>&1
             rc=$?
             tail -8 sync-detail.log | tee -a "$LOG"
@@ -243,6 +245,22 @@ jobs:
           # 迷你产品：只含 arkcompiler/ets_runtime —— 官方机制下"只编译需要的模块"
           python3 -c "import json,os; os.makedirs('productdefine/common/products', exist_ok=True); json.dump({'product_name':'how_ark_mini','device_company':'ohos','board':'x86_64','target_cpu':'x86_64','type':'standard','version':'3.0','compile_mode':'host','subsystems':[{'subsystem':'arkcompiler','components':[{'component':'ets_runtime','features':[]}]}]}, open('productdefine/common/products/how_ark_mini.json','w'), indent=2)"
           echo "== how_ark_mini.json 已写入 ==" | tee -a "$LOG"
+          # 组件白名单：hb _cropping_components 只保留 src 部件 + 白名单组件，
+          # libuv/protobuf/abseil-cpp 等不在内置表 → 用 out/products_ext 官方覆盖钩子补全
+          python3 -c "
+          import json, os, glob
+          base = json.load(open('build/third_party_allow_list.json'))
+          try: auto = json.load(open('build/auto_install_whitelist.json'))
+          except Exception: auto = []
+          extra = ['ets_runtime','ets_frontend','runtime_core','c_utils','hilog','i18n','qos_manager','build_framework']
+          for f in glob.glob('third_party/*/bundle.json') + glob.glob('*/*/bundle.json'):
+              try: extra.append(json.load(open(f))['component']['name'])
+              except Exception: pass
+          merged = sorted(set(base) | set(auto) | set(extra))
+          os.makedirs('out/products_ext', exist_ok=True)
+          json.dump(merged, open('out/products_ext/third_party_allow_list.json','w'), indent=2)
+          print('products_ext allow list:', len(merged))"
+          echo "== products_ext 白名单已写 ==" | tee -a "$LOG"
           if [ -f build.sh ]; then
             echo "== prebuilts_download（官方工具链，build.sh 硬依赖，重试 3 次）==" | tee -a "$LOG"
             # npm registry 预设为华为云镜像（上一轮 npm install 默认源抖动失败）
@@ -262,7 +280,8 @@ jobs:
             fi
             echo "== build.sh --build-target ark_js_host_linux_tools_packages（只编译宿主工具子图）==" | tee -a "$LOG"
             (timeout 3000 bash build.sh --product-name how_ark_mini \
-               --build-target ark_js_host_linux_tools_packages 2>&1 || true) | tail -80 | tee -a "$LOG"
+               --build-target ark_js_host_linux_tools_packages \
+               --gn-args is_host_product=true 2>&1 || true) | tail -80 | tee -a "$LOG"
             echo "== 产物搜寻 ==" | tee -a "$LOG"
             (find out -type f \( -name 'ark_js_vm' -o -name 'es2abc' -o -name '*.abc' \) 2>/dev/null | head -10 || true) | tee -a "$LOG"
           else
