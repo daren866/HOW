@@ -28,6 +28,6 @@ $(HOW): $(SRC) src/how.h src/howcore.h
 	$(CC) $(SRC) $(INC) $(CFLAGS) $(LDFLAGS) -o $@
 
 clean:
-        rm -f $(HOW)
+	rm -f $(HOW)
 
 .PHONY: clean
