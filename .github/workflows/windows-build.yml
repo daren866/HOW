@@ -241,7 +241,7 @@ jobs:
           (du -sh arkcompiler/* build productdefine third_party/* 2>/dev/null || true) | tee -a "$LOG"
           (ls -la build.sh build.py .gn 2>/dev/null || true) | tee -a "$LOG"
           # 迷你产品：只含 arkcompiler/ets_runtime —— 官方机制下"只编译需要的模块"
-          python3 -c "import json,os; os.makedirs('productdefine/common/products', exist_ok=True); json.dump({'product_name':'how_ark_mini','device_company':'ohos','board':'x86_64','target_cpu':'x86_64','type':'standard','version':'3.0','subsystems':[{'subsystem':'arkcompiler','components':[{'component':'ets_runtime','features':[]}]}]}, open('productdefine/common/products/how_ark_mini.json','w'), indent=2)"
+          python3 -c "import json,os; os.makedirs('productdefine/common/products', exist_ok=True); json.dump({'product_name':'how_ark_mini','device_company':'ohos','board':'x86_64','target_cpu':'x86_64','type':'standard','version':'3.0','compile_mode':'host','subsystems':[{'subsystem':'arkcompiler','components':[{'component':'ets_runtime','features':[]}]}]}, open('productdefine/common/products/how_ark_mini.json','w'), indent=2)"
           echo "== how_ark_mini.json 已写入 ==" | tee -a "$LOG"
           if [ -f build.sh ]; then
             echo "== prebuilts_download（官方工具链，build.sh 硬依赖，重试 3 次）==" | tee -a "$LOG"
@@ -262,7 +262,7 @@ jobs:
             fi
             echo "== build.sh --build-target ark_js_host_linux_tools_packages（只编译宿主工具子图）==" | tee -a "$LOG"
             (timeout 3000 bash build.sh --product-name how_ark_mini \
-               --build-target ark_js_host_linux_tools_packages 2>&1 || true) | tail -50 | tee -a "$LOG"
+               --build-target ark_js_host_linux_tools_packages 2>&1 || true) | tail -80 | tee -a "$LOG"
             echo "== 产物搜寻 ==" | tee -a "$LOG"
             (find out -type f \( -name 'ark_js_vm' -o -name 'es2abc' -o -name '*.abc' \) 2>/dev/null | head -10 || true) | tee -a "$LOG"
           else
