@@ -299,10 +299,11 @@ jobs:
             | grep -v '\.cpp$' | head -40 | while read -r f; do
               cp "$f" out/bin/ 2>/dev/null || true
             done
-          # repo sync 全树构建产物（ark_js_vm / es2abc 等 host 工具）
-          find ohos/out -type f -executable \
-            \( -name 'ark_js_vm' -o -name 'es2abc' -o -name 'libark_jsruntime.so' \) \
-            -size -200M 2>/dev/null | head -10 | while read -r f; do
+          # repo sync 迷你产品编译产物：宿主工具 + 全部运行时依赖 so（含 libhmicui18n 等）
+          find ohos/out/host -type f -executable \
+            \( -name '*.so' -o -name '*.so.*' -o -name 'ark_*' -o -name 'profdump' \
+               -o -name 'quick_fix' \) -size -200M 2>/dev/null \
+            | grep -v '/gen/' | grep -v '/obj/' | head -40 | while read -r f; do
               cp "$f" out/bin/ 2>/dev/null || true
             done
           cp arkcompiler_runtime_core/deps-layout.txt out/log/ 2>/dev/null || true
