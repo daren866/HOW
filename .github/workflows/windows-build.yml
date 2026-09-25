@@ -126,7 +126,7 @@ jobs:
   ark-runtime:
     name: Upstream Ark runtime (Ubuntu x64)
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 240
     continue-on-error: true
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     steps:
@@ -137,11 +137,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov gdb
 
-      - name: Clone upstream repos
+      - name: Clone arkcompiler_runtime_core (v4.1, CMake-able)
         run: |
           # runtime_core 用 v4.1-Release：该版本保留可用的独立 CMake 构建（master 已转向 GN）
+          # ets_runtime 不再单独 clone：master 无独立构建入口，改由下一步 repo sync 拉全树
           git clone --depth 1 --branch OpenHarmony-v4.1-Release https://github.com/OpenHarmony/arkcompiler_runtime_core.git
-          git clone --depth 1 https://github.com/OpenHarmony/arkcompiler_ets_runtime.git
 
       - name: Pre-fetch third-party deps (manifest driven)
         run: |
@@ -191,28 +191,57 @@ jobs:
             && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
           tail -25 ../log-core.txt || true
 
-      - name: Build arkcompiler_ets_runtime (OHOS build system attempt)
+      - name: Build arkcompiler_ets_runtime (OHOS repo sync, 本地已实测配方)
         run: |
-          cd arkcompiler_ets_runtime
-          ls -la | tee ../log-ets-tree.txt
-          if [ ! -f build.sh ]; then
-            echo "== ets_runtime 独立构建需完整 OpenHarmony 源码树，尝试 group 过滤的 repo sync ==" | tee ../log-ets.txt
-            sudo apt-get install -y repo || true
-            mkdir -p ../ohos && cd ../ohos
-            (repo init -u https://gitee.com/openharmony/manifest.git -b master --depth 1 -g default,arkcompiler 2>&1 || true) | tee -a ../HOW/log-ets.txt
-            (repo sync -c -j4 --no-tags 2>&1 || true) | tee -a ../HOW/log-ets.txt
-            ls | tee -a ../HOW/log-ets.txt || true
-            if [ -f build.sh ]; then
-              echo "== prebuilts_download ==" | tee -a ../HOW/log-ets.txt
-              (bash build/prebuilts_download.sh 2>&1 || true) | tee -a ../HOW/log-ets.txt
-              echo "== build.sh ark_js_host_linux_tools_packages ==" | tee -a ../HOW/log-ets.txt
-              (bash build.sh --product-name hispark_taurus_standard --build-target ark_js_host_linux_tools_packages 2>&1 || true) | tee -a ../HOW/log-ets.txt
-              find out -name 'ark_js_vm' -o -name '*.abc' 2>/dev/null | head -10 | tee -a ../HOW/log-ets.txt || true
-            else
-              echo "repo sync 后仍无 build.sh" | tee -a ../HOW/log-ets.txt
+          LOG="$GITHUB_WORKSPACE/log-ets.txt"
+          echo "== OHOS repo sync 实验（$(date -u +%FT%TZ)）==" | tee "$LOG"
+          # repo 启动器：官方源直连（apt 的 repo 包版本过旧）
+          sudo curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
+          sudo chmod a+x /usr/local/bin/repo
+          repo version 2>/dev/null | head -2 | tee -a "$LOG"
+          git config --global user.email "ci@how.local"
+          git config --global user.name "HOW CI"
+          # 实测要点：
+          #  - manifest 用 GitHub 镜像（gitee 同源备用）；master 分支项目 remote 已迁至 gitcode.com
+          #  - manifest 没有 arkcompiler group（旧写法 -g default,arkcompiler 无效且等于全量同步）
+          #  - 正确姿势：repo init 后按「项目名」精确同步；build 项目的 linkfile 会在树根
+          #    生成 build.sh / build.py / .gn 三个符号链接，全树构建入口即就绪
+          mkdir -p ohos && cd ohos
+          echo "== repo init（GitHub manifest 镜像，浅克隆）==" | tee -a "$LOG"
+          (repo init -u https://github.com/OpenHarmony/manifest.git -b master \
+             --manifest-depth=1 --depth=1 \
+             --repo-url=https://github.com/GerritCodeReview/git-repo.git \
+             --no-clone-bundle 2>&1 || true) | tail -5 | tee -a "$LOG"
+          echo "== 第一轮：按项目名精确同步（保证核心树）==" | tee -a "$LOG"
+          for i in 1 2 3; do
+            repo sync -c -j4 --no-tags build arkcompiler_ets_runtime \
+              arkcompiler_ets_frontend arkcompiler_runtime_core commonlibrary_c_utils \
+              > sync-detail.log 2>&1
+            rc=$?
+            tail -8 sync-detail.log | tee -a "$LOG"
+            if [ $rc -eq 0 ] && [ -d arkcompiler/ets_runtime ] && [ -d build ]; then
+              echo "第 $i 次同步成功（rc=0）" | tee -a "$LOG"; break
             fi
+            echo "第 $i 次同步不完整（rc=$rc），重试…" | tee -a "$LOG"
+          done
+          echo "== 同步结果 ==" | tee -a "$LOG"
+          (repo list 2>/dev/null || true) | tee -a "$LOG"
+          (du -sh arkcompiler/* build 2>/dev/null || true) | tee -a "$LOG"
+          (ls -la build.sh build.py .gn 2>/dev/null || true) | tee -a "$LOG"
+          echo "== 第二轮（尽力）：全量源码树，供 build.sh 产品配置解析 ==" | tee -a "$LOG"
+          (timeout 3000 repo sync -c -j8 --no-tags 2>&1 || true) | tail -6 | tee -a "$LOG"
+          (du -sh . 2>/dev/null || true) | tee -a "$LOG"
+          if [ -f build.sh ]; then
+            echo "== prebuilts_download（预编译工具链，量大需时）==" | tee -a "$LOG"
+            (timeout 2400 bash build/prebuilts_download.sh 2>&1 || true) | tail -10 | tee -a "$LOG"
+            echo "== build.sh --build-target ark_js_host_linux_tools_packages ==" | tee -a "$LOG"
+            (timeout 3000 bash build.sh --product-name hispark_taurus_standard \
+               --build-target ark_js_host_linux_tools_packages 2>&1 || true) | tail -50 | tee -a "$LOG"
+            echo "== 产物搜寻 ==" | tee -a "$LOG"
+            (find out -type f \( -name 'ark_js_vm' -o -name 'es2abc' -o -name '*.abc' \) 2>/dev/null | head -10 || true) | tee -a "$LOG"
+          else
+            echo "!! repo sync 后仍无根 build.sh（linkfile 未生成）" | tee -a "$LOG"
           fi
-          tail -20 ../HOW/log-ets.txt 2>/dev/null || true
 
       - name: Collect artifacts
         if: always()
@@ -224,8 +253,15 @@ jobs:
             | grep -v '\.cpp$' | head -40 | while read -r f; do
               cp "$f" out/bin/ 2>/dev/null || true
             done
+          # repo sync 全树构建产物（ark_js_vm / es2abc 等 host 工具）
+          find ohos/out -type f -executable \
+            \( -name 'ark_js_vm' -o -name 'es2abc' -o -name 'libark_jsruntime.so' \) \
+            -size -200M 2>/dev/null | head -10 | while read -r f; do
+              cp "$f" out/bin/ 2>/dev/null || true
+            done
           cp arkcompiler_runtime_core/deps-layout.txt out/log/ 2>/dev/null || true
           cp log-*.txt out/log/ 2>/dev/null || true
+          cp ohos/sync-detail.log out/log/ 2>/dev/null || true
           echo "binaries:"; ls -la out/bin | head -20
           echo "logs:"; ls -la out/log
 
