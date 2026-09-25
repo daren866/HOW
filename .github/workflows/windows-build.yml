@@ -371,6 +371,8 @@ jobs:
                           'message(STATUS "install-third-party skipped on Windows - deps pre-installed by official script")')
           Set-Content -Path $cl -Value $c -NoNewline
           Write-Host "CMakeLists patched: install-third-party failure is non-fatal"
+          # 环境变量形式：嵌套 configure（cross_values 子项目）也会继承
+          $env:CMAKE_POLICY_VERSION_MINIMUM = "3.5"
           cmake -S $core -B build -DCMAKE_BUILD_TYPE=Release `
             -DPANDA_ENABLE_CLANG_TIDY=OFF -DPANDA_ENABLE_TESTS=OFF `
             -DPANDA_ENABLE_COVERAGE=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5 `
