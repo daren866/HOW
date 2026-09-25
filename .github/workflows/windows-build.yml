@@ -230,6 +230,7 @@ jobs:
               third_party_abseil-cpp third_party_googletest third_party_pcre2 \
               third_party_flatbuffers global_i18n hiviewdfx_hilog \
               resourceschedule_qos_manager testfwk_developer_test \
+              developtools_integration_verification \
               > sync-detail.log 2>&1
             rc=$?
             tail -8 sync-detail.log | tee -a "$LOG"
