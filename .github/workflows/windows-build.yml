@@ -147,39 +147,29 @@ jobs:
           # ets_runtime 不再单独 clone：master 无独立构建入口，改由下一步 repo sync 拉全树
           git clone --depth 1 --branch OpenHarmony-v4.1-Release https://github.com/OpenHarmony/arkcompiler_runtime_core.git
 
-      - name: Pre-fetch third-party deps (manifest driven)
+      - name: Install third-party deps (official script)
         run: |
           cd arkcompiler_runtime_core
-          # 自适应布局：v4.1 独立构建在 static_core/（第三方放 static_core/third_party）
+          # 官方安装脚本（钉住版本 + 补丁 + 子模块）。
+          # 根因修复：此前用仓库根目录旧清单预取装了错误版本（vixl 无 CMakeLists.txt 等），
+          # 且官方脚本对已存在目录跳过 -> 错误版本占位，CMake 在 add_subdirectory(vixl) 必挂。
+          # 必须先清空 static_core/third_party 再交给官方脚本。
           if [ -f static_core/CMakeLists.txt ]; then
-            CORE_DIR=static_core; DEST=static_core/third_party
+            CORE_DIR=static_core
           else
-            CORE_DIR=.; DEST=ark-third-party
+            CORE_DIR=.
           fi
-          echo "layout: $CORE_DIR -> $DEST" | tee deps-layout.txt
-          mkdir -p "$DEST"
-          MANIFEST=scripts/third-party-lists/public
-          [ -f "$MANIFEST" ] || MANIFEST=$CORE_DIR/scripts/third-party-lists/public
-          while IFS=, read -r name repo ctype cid pmode smode; do
-            case "$name" in ''|\#*) continue;; esac
-            name=$(echo "$name" | xargs)
-            [ -z "$name" ] && continue
-            [ -d "$DEST/$name/.git" ] && continue
-            # git.linaro.org 不稳定，换 GitHub 官方镜像
-            case "$repo" in *git.linaro.org*) repo="https://github.com/Linaro/vixl.git";; esac
-            echo "== $name <- $repo ($ctype $cid)"
-            case "$ctype" in
-              branch|tag)
-                git clone -q --depth 1 --branch "$cid" "$repo" "$DEST/$name" || echo "clone $name FAILED"
-                ;;
-              commit)
-                git init -q "$DEST/$name"
-                git -C "$DEST/$name" fetch -q --depth 1 "$repo" "$cid" || echo "fetch $name FAILED"
-                git -C "$DEST/$name" checkout -q FETCH_HEAD || true
-                ;;
-            esac
-          done < "$MANIFEST"
-          ls "$DEST"
+          echo "layout: $CORE_DIR -> $CORE_DIR/third_party" | tee deps-layout.txt
+          if [ -f "$CORE_DIR/scripts/install-third-party" ]; then
+            rm -rf "$CORE_DIR/third_party"
+            bash "$CORE_DIR/scripts/install-third-party" || echo "install-third-party rc=$?（尽力而为，继续）"
+          else
+            echo "!! 未找到官方 install-third-party 脚本"
+          fi
+          echo "== third_party 安装结果 =="
+          ls "$CORE_DIR/third_party" | head -20
+          echo "== vixl CMakeLists 存在性 ==" | tee -a deps-layout.txt
+          ls "$CORE_DIR/third_party/vixl/CMakeLists.txt" 2>/dev/null || echo "vixl/CMakeLists.txt 缺失" | tee -a deps-layout.txt
 
       - name: Build arkcompiler_runtime_core (CMake)
         run: |
@@ -307,9 +297,9 @@ jobs:
                -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
                -DPANDA_ENABLE_COVERAGE=false -DPANDA_WITH_ETS=false \
                && cmake --build build-win -j"$(nproc)") \
-               2>&1 | tail -45 | tee -a "$LOG" || true
+               2>&1 | tail -60 | tee -a "$LOG" || true
             echo "== 产物 .exe ==" | tee -a "$LOG"
-            (find build-win -name '*.exe' | head -20 || true) | tee -a "$LOG"
+            (find build-win -name '*.exe' | head -30 || true) | tee -a "$LOG"
           fi
 
       - name: Collect artifacts
