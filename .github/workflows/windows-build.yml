@@ -125,7 +125,7 @@ jobs:
   # ---------- 上游真实 Ark 运行时编译尝试（Ubuntu x64） ----------
   ark-runtime:
     name: Upstream Ark runtime (Ubuntu x64)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 240
     continue-on-error: true
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
@@ -135,7 +135,11 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov gdb
+          # libtinfo5: prebuilts clang 链接依赖（22.04 才有此包）；
+          # 其余为 build/tools_checker.py 要求的系统工具（消除 Missing dependencies）
+          sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov gdb \
+            ccache default-jdk libtinfo5 genext2fs u-boot-tools mtools mtd-utils scons \
+            gcc-arm-none-eabi
 
       - name: Clone arkcompiler_runtime_core (v4.1, CMake-able)
         run: |
@@ -240,8 +244,22 @@ jobs:
           python3 -c "import json,os; os.makedirs('productdefine/common/products', exist_ok=True); json.dump({'product_name':'how_ark_mini','device_company':'ohos','board':'x86_64','target_cpu':'x86_64','type':'standard','version':'3.0','subsystems':[{'subsystem':'arkcompiler','components':[{'component':'ets_runtime','features':[]}]}]}, open('productdefine/common/products/how_ark_mini.json','w'), indent=2)"
           echo "== how_ark_mini.json 已写入 ==" | tee -a "$LOG"
           if [ -f build.sh ]; then
-            echo "== prebuilts_download（官方工具链，build.sh 硬依赖）==" | tee -a "$LOG"
-            (timeout 2400 bash build/prebuilts_download.sh 2>&1 || true) | tail -10 | tee -a "$LOG"
+            echo "== prebuilts_download（官方工具链，build.sh 硬依赖，重试 3 次）==" | tee -a "$LOG"
+            # npm registry 预设为华为云镜像（上一轮 npm install 默认源抖动失败）
+            npm config set registry https://repo.huaweicloud.com/repository/npm/ || true
+            for i in 1 2 3; do
+              (timeout 2400 bash build/prebuilts_download.sh 2>&1 || true) | tail -6 | tee -a "$LOG"
+              # build.sh 硬依赖 prebuilts/python 与 build-tools，以此判成功
+              if ls prebuilts/python/linux-x86/*/bin/python3 >/dev/null 2>&1 \
+                 && [ -d prebuilts/build-tools ]; then
+                echo "prebuilts 就绪（第 $i 次）" | tee -a "$LOG"; break
+              fi
+            done
+            # hb 需要 jinja2/yaml（prebuilts python 自带 pip）
+            PY3=$(ls prebuilts/python/linux-x86/*/bin/python3 2>/dev/null | tail -1)
+            if [ -n "$PY3" ]; then
+              ("$PY3" -m pip install jinja2 pyyaml 2>&1 || true) | tail -3 | tee -a "$LOG"
+            fi
             echo "== build.sh --build-target ark_js_host_linux_tools_packages（只编译宿主工具子图）==" | tee -a "$LOG"
             (timeout 3000 bash build.sh --product-name how_ark_mini \
                --build-target ark_js_host_linux_tools_packages 2>&1 || true) | tail -50 | tee -a "$LOG"
