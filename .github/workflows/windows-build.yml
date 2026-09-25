@@ -373,7 +373,8 @@ jobs:
           Write-Host "CMakeLists patched: install-third-party failure is non-fatal"
           cmake -S $core -B build -DCMAKE_BUILD_TYPE=Release `
             -DPANDA_ENABLE_CLANG_TIDY=OFF -DPANDA_ENABLE_TESTS=OFF `
-            -DPANDA_ENABLE_COVERAGE=OFF 2>&1 | Tee-Object -FilePath configure.log | Select-Object -Last 25
+            -DPANDA_ENABLE_COVERAGE=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5 `
+            2>&1 | Tee-Object -FilePath configure.log | Select-Object -Last 30
           if (-not (Test-Path "build/build.ninja") -and -not (Test-Path "build/HOW.sln") -and -not (Get-ChildItem build -Filter *.sln -ErrorAction SilentlyContinue)) {
             Write-Host "!! configure 失败，中止构建"
             exit 0
