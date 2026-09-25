@@ -31,7 +31,7 @@ static int wsl_available(void) {
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = TRUE;
     HANDLE rd = NULL, wr = NULL;
-    if (!CreatePipeW(&rd, &wr, &sa, 0)) return 0;
+    if (!CreatePipe(&rd, &wr, &sa, 0)) return 0;
     SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -144,7 +144,7 @@ int arkrt_exec(ArkRtProbe *p, const wchar_t *abcPathW, char *outBuf, int outCap)
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = TRUE;
     HANDLE rd = NULL, wr = NULL;
-    if (!CreatePipeW(&rd, &wr, &sa, 1024 * 1024)) return -2; /* 1MB 缓冲防写阻塞 */
+    if (!CreatePipe(&rd, &wr, &sa, 1024 * 1024)) return -2; /* 1MB 缓冲防写阻塞 */
     SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
 
     wchar_t cmd[2400];
