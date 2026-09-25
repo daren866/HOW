@@ -218,7 +218,11 @@ jobs:
           (cmake -S "$CORE_DIR" -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
             -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
             -DPANDA_ENABLE_COVERAGE=false \
+            -DCMAKE_C_FLAGS="-w" -DCMAKE_CXX_FLAGS="-w" \
             && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
+          # v0.3.10 实测：越过 libdwarf 后（libdwarf-dev 已装），[178/1603] 死于 asmjit
+          # vendored 代码被 GCC11 的 -Werror=shadow 升级（'src' shadows a member）；
+          # 这是 bonus 构建，用 -w 全局压制告警升级（-w 优先级高于后续 -Werror）
           tail -25 ../log-core.txt || true
 
       - name: Build arkcompiler_ets_runtime (repo sync 依赖子集 + 迷你产品单模块编译)
@@ -329,13 +333,22 @@ jobs:
             echo "!! 未找到 mingw 交叉工具链" | tee -a "$LOG"
           else
             echo "toolchain: $TC" | tee -a "$LOG"
+            # 关键：失败点在 cross_values 嵌套子项目（execute_process 单独 configure），
+            # 命令行 -DCMAKE_CXX_FLAGS 不被继承；只有工具链文件会传递到子项目。
+            # 把宏写进 CMAKE_*_FLAGS_INIT（工具链文件内合法的初始化变量），子项目 fresh configure 时生效。
+            TC_OUT="$GITHUB_WORKSPACE/arkcompiler_runtime_core/patched-mingw-toolchain.cmake"
+            {
+              cat "$TC"
+              printf '\n# HOW: clang 交叉需显式启用 mingw ANSI stdio（gcc 自动启用而 clang 不会）\n'
+              printf 'set(CMAKE_C_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -D__USE_MINGW_ANSI_STDIO=1")\n'
+              printf 'set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -D__USE_MINGW_ANSI_STDIO=1")\n'
+            } > "$TC_OUT"
+            echo "patched toolchain -> $TC_OUT" | tee -a "$LOG"
             (cmake -S "$CORE" -B build-win -GNinja \
-               -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/arkcompiler_runtime_core/$TC" \
+               -DCMAKE_TOOLCHAIN_FILE="$TC_OUT" \
                -DCMAKE_BUILD_TYPE=Release \
                -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
                -DPANDA_ENABLE_COVERAGE=false -DPANDA_WITH_ETS=false \
-               -DCMAKE_C_FLAGS="-D__USE_MINGW_ANSI_STDIO=1" \
-               -DCMAKE_CXX_FLAGS="-D__USE_MINGW_ANSI_STDIO=1" \
                && cmake --build build-win -j"$(nproc)") \
                2>&1 | tail -60 | tee -a "$LOG" || true
             # v0.3.9 实测：clang 交叉编译时 mingw 头不声明 snprintf/vsnprintf（gcc 会自动启用
