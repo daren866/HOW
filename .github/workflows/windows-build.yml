@@ -139,7 +139,9 @@ jobs:
           # 其余为 build/tools_checker.py 要求的系统工具（消除 Missing dependencies）
           sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov gdb \
             ccache default-jdk libtinfo5 genext2fs u-boot-tools mtools mtd-utils scons \
-            gcc-arm-none-eabi ruby clang-14 g++-mingw-w64-x86-64
+            gcc-arm-none-eabi ruby clang-14 g++-mingw-w64-x86-64 libdwarf-dev
+          # libdwarf-dev: v0.3.9 实测 runtime_core Linux CMake 编译到 [132/1603] 时
+          # libpandabase/os/stacktrace.cpp 缺 <libdwarf/libdwarf.h> 而失败
 
       - name: Clone arkcompiler_runtime_core (v4.1, CMake-able)
         run: |
@@ -322,8 +324,13 @@ jobs:
                -DCMAKE_BUILD_TYPE=Release \
                -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
                -DPANDA_ENABLE_COVERAGE=false -DPANDA_WITH_ETS=false \
+               -DCMAKE_C_FLAGS="-D__USE_MINGW_ANSI_STDIO=1" \
+               -DCMAKE_CXX_FLAGS="-D__USE_MINGW_ANSI_STDIO=1" \
                && cmake --build build-win -j"$(nproc)") \
                2>&1 | tail -60 | tee -a "$LOG" || true
+            # v0.3.9 实测：clang 交叉编译时 mingw 头不声明 snprintf/vsnprintf（gcc 会自动启用
+            # mingw-ansi stdio 而 clang 不会）→ cstdio 'using ::snprintf' 报 no member；
+            # 显式定义 __USE_MINGW_ANSI_STDIO=1 后映射到 __mingw_snprintf 等已声明函数
             echo "== 产物 .exe ==" | tee -a "$LOG"
             (find build-win -name '*.exe' | head -30 || true) | tee -a "$LOG"
           fi
