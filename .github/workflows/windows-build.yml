@@ -132,6 +132,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: ccache restore
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ohos-ccache-${{ github.run_id }}
+          restore-keys: |
+            ohos-ccache-
+        # v0.3.9 实测冷启动 ninja 3270s（命中率 4.4%，缓存 0.12GB）；
+        # 命中后可显著缩短宿主工具子图编译
+
       - name: Install deps
         run: |
           sudo apt-get update
@@ -503,7 +513,15 @@ jobs:
     name: Release integrate (runtime + renderer bundles)
     runs-on: ubuntu-latest
     needs: [build-x64, build-xp, how-core-linux, ark-runtime, ark-runtime-windows, renderer-skia]
-    if: startsWith(github.ref, 'refs/tags/')
+    # v0.3.9 教训：renderer-skia 超时 cancelled 会连带 skip release → 整个 Release 丢失。
+    # 改为 always() 下仍运行，但三个必需 job（x64/XP/核心单测，含 selftest 门禁）必须成功；
+    # ark-runtime / ark-runtime-windows / renderer-skia 为可选增强（continue-on-error）。
+    if: >-
+      always() &&
+      startsWith(github.ref, 'refs/tags/') &&
+      needs.build-x64.result == 'success' &&
+      needs.build-xp.result == 'success' &&
+      needs.how-core-linux.result == 'success'
     steps:
       - uses: actions/checkout@v4
 
@@ -565,10 +583,20 @@ jobs:
           } > bundle-ark/README-BUNDLE.md
           (cd bundle-ark && zip -qr ../HOW-ark-runtime-ubuntu-x64.zip .)
 
-          # 3) 渲染器 bundle（Skia 静态库）
+          # 3) 渲染器 bundle（Skia 静态库）—— v0.3.9 教训：Skia job 超时被取消时
+          #    也要发版，bundle 内以 README 说明缺席原因
           mkdir -p bundle-skia
-          cp -r art/skia-ubuntu/. bundle-skia/ 2>/dev/null || true
-          {
+          if [ -f art/skia-ubuntu/lib/libskia.a ]; then
+            cp -r art/skia-ubuntu/. bundle-skia/
+          else
+            {
+              echo "# HOW Skia renderer bundle (Ubuntu x64)"
+              echo ""
+              echo "本次运行 Skia job 未产出（git-sync-deps 超时或被取消，见 Actions 日志）。"
+              echo "历史版本（如 v0.3.8）的 HOW-skia-renderer-ubuntu-x64.zip 中有 libskia.a 可用。"
+            } > bundle-skia/README-BUNDLE.md
+          fi
+          [ -f bundle-skia/README-BUNDLE.md ] || {
             echo "# HOW Skia renderer bundle (Ubuntu x64)"
             echo ""
             echo "- libskia.a: 上游 Skia（OpenHarmony Rosen 同源渲染后端）静态库"
