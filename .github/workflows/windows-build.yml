@@ -174,13 +174,25 @@ jobs:
       - name: Patch ruby generators (Ruby 3.x OpenStruct)
         run: |
           # Ruby 3.x 不再自动加载 ostruct，上游 gen.rb/merge.rb 直接用 OpenStruct 会 NameError
+          # ⚠ v0.3.8 教训：sed '1i' 会把 require 插到 shebang 之前 —— 这些 .rb 被 CMake
+          # execute_process 直接执行，shebang 必须留在第 1 行，否则内核把文件当 shell
+          # 脚本跑，报 "require: not found"，Linux 与 mingw 交叉两个构建全挂。
           cd arkcompiler_runtime_core
           if [ -f static_core/CMakeLists.txt ]; then CORE=static_core; else CORE=.; fi
           grep -rl "OpenStruct" "$CORE" --include='*.rb' 2>/dev/null | while read -r f; do
             if ! grep -q 'require .ostruct' "$f"; then
-              sed -i '1i require "ostruct"' "$f"
+              if head -1 "$f" | grep -q '^#!'; then
+                sed -i '2i require "ostruct"' "$f"   # shebang 之后
+              else
+                sed -i '1i require "ostruct"' "$f"
+              fi
               echo "patched: $f"
             fi
+          done
+          # 自检：CMake 直接执行的生成器必须保留 shebang 于第 1 行
+          for f in "$CORE/templates/merge.rb" "$CORE/isa/gen.rb" "$CORE/templates/common.rb"; do
+            [ -f "$f" ] || continue
+            if head -1 "$f" | grep -q '^#!'; then echo "shebang OK: $f"; else echo "shebang LOST: $f"; fi
           done
 
       - name: Build arkcompiler_runtime_core (CMake)
@@ -282,7 +294,9 @@ jobs:
               ("$PY3" -m pip install jinja2 pyyaml 2>&1 || true) | tail -3 | tee -a "$LOG"
             fi
             echo "== build.sh --build-target ark_js_host_linux_tools_packages（只编译宿主工具子图）==" | tee -a "$LOG"
-            (timeout 3000 bash build.sh --product-name how_ark_mini \
+            # v0.3.8 实测：ninja 走到 2058/2068（ark_js_vm main.o 编译中）被 3000s 杀掉，仅差约 10 步。
+            # 提到 4500s（整个 job 预算 240min，本步之前累计仅 ~67min，余量充足）。
+            (timeout 4500 bash build.sh --product-name how_ark_mini \
                --build-target ark_js_host_linux_tools_packages \
                --gn-args is_host_product=true 2>&1 || true) | tail -80 | tee -a "$LOG"
             echo "== 产物搜寻 ==" | tee -a "$LOG"
