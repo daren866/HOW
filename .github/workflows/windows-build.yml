@@ -139,7 +139,7 @@ jobs:
           # 其余为 build/tools_checker.py 要求的系统工具（消除 Missing dependencies）
           sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov gdb \
             ccache default-jdk libtinfo5 genext2fs u-boot-tools mtools mtd-utils scons \
-            gcc-arm-none-eabi ruby clang-14 g++-mingw-w64-x86_64
+            gcc-arm-none-eabi ruby clang-14 g++-mingw-w64-x86-64
 
       - name: Clone arkcompiler_runtime_core (v4.1, CMake-able)
         run: |
