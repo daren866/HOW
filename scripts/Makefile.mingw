@@ -25,7 +25,7 @@ LDFLAGS += -Wl,--major-os-version,5,--minor-os-version,1 \
 endif
 
 $(HOW): $(SRC) src/how.h src/howcore.h
-        $(CC) $(SRC) $(INC) $(CFLAGS) $(LDFLAGS) -o $@
+	$(CC) $(SRC) $(INC) $(CFLAGS) $(LDFLAGS) -o $@
 
 clean:
         rm -f $(HOW)
