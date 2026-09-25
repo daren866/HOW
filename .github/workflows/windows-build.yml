@@ -191,7 +191,7 @@ jobs:
             && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
           tail -25 ../log-core.txt || true
 
-      - name: Build arkcompiler_ets_runtime (OHOS repo sync, 本地已实测配方)
+      - name: Build arkcompiler_ets_runtime (repo sync 依赖子集 + 迷你产品单模块编译)
         run: |
           LOG="$GITHUB_WORKSPACE/log-ets.txt"
           echo "== OHOS repo sync 实验（$(date -u +%FT%TZ)）==" | tee "$LOG"
@@ -201,21 +201,29 @@ jobs:
           repo version 2>/dev/null | head -2 | tee -a "$LOG"
           git config --global user.email "ci@how.local"
           git config --global user.name "HOW CI"
-          # 实测要点：
-          #  - manifest 用 GitHub 镜像（gitee 同源备用）；master 分支项目 remote 已迁至 gitcode.com
-          #  - manifest 没有 arkcompiler group（旧写法 -g default,arkcompiler 无效且等于全量同步）
-          #  - 正确姿势：repo init 后按「项目名」精确同步；build 项目的 linkfile 会在树根
-          #    生成 build.sh / build.py / .gn 三个符号链接，全树构建入口即就绪
+          # 实测要点（本地沙箱已验证，commit 019fdc7 前后）：
+          #  - manifest 用 GitHub 镜像；master 分支项目 remote 已迁至 gitcode.com
+          #  - manifest 无 arkcompiler group，旧 -g default,arkcompiler 写法无效
+          #  - 按项目名精确同步（浅克隆）；build 项目 linkfile 在树根生成 build.sh/build.py/.gn
+          #  - 只拉需要的模块：核心 + ets_runtime 实际引用的依赖仓库（external_deps 驱动，
+          #    名单已逐一在 manifest 验证；cJSON 大写、commonlibrary_c_utils 等易踩坑）
+          #  - 不做全量树同步；迷你产品 json 只含 arkcompiler/ets_runtime，
+          #    build.sh --build-target 只编译宿主工具子图，符合公开仓库 Actions 资源约束
           mkdir -p ohos && cd ohos
           echo "== repo init（GitHub manifest 镜像，浅克隆）==" | tee -a "$LOG"
           (repo init -u https://github.com/OpenHarmony/manifest.git -b master \
              --manifest-depth=1 --depth=1 \
              --repo-url=https://github.com/GerritCodeReview/git-repo.git \
              --no-clone-bundle 2>&1 || true) | tail -5 | tee -a "$LOG"
-          echo "== 第一轮：按项目名精确同步（保证核心树）==" | tee -a "$LOG"
+          echo "== 按项目名同步（构建链依赖子集，重试 3 次）==" | tee -a "$LOG"
           for i in 1 2 3; do
-            repo sync -c -j4 --no-tags build arkcompiler_ets_runtime \
-              arkcompiler_ets_frontend arkcompiler_runtime_core commonlibrary_c_utils \
+            repo sync -c -j4 --no-tags \
+              build productdefine_common \
+              arkcompiler_ets_runtime arkcompiler_ets_frontend arkcompiler_runtime_core \
+              commonlibrary_c_utils \
+              third_party_icu third_party_zlib third_party_libuv third_party_protobuf \
+              third_party_cJSON third_party_json third_party_bounds_checking_function \
+              global_i18n hiviewdfx_hilog resourceschedule_qos_manager \
               > sync-detail.log 2>&1
             rc=$?
             tail -8 sync-detail.log | tee -a "$LOG"
@@ -226,16 +234,16 @@ jobs:
           done
           echo "== 同步结果 ==" | tee -a "$LOG"
           (repo list 2>/dev/null || true) | tee -a "$LOG"
-          (du -sh arkcompiler/* build 2>/dev/null || true) | tee -a "$LOG"
+          (du -sh arkcompiler/* build productdefine third_party/* 2>/dev/null || true) | tee -a "$LOG"
           (ls -la build.sh build.py .gn 2>/dev/null || true) | tee -a "$LOG"
-          echo "== 第二轮（尽力）：全量源码树，供 build.sh 产品配置解析 ==" | tee -a "$LOG"
-          (timeout 3000 repo sync -c -j8 --no-tags 2>&1 || true) | tail -6 | tee -a "$LOG"
-          (du -sh . 2>/dev/null || true) | tee -a "$LOG"
+          # 迷你产品：只含 arkcompiler/ets_runtime —— 官方机制下"只编译需要的模块"
+          python3 -c "import json,os; os.makedirs('productdefine/common/products', exist_ok=True); json.dump({'product_name':'how_ark_mini','device_company':'ohos','board':'x86_64','target_cpu':'x86_64','type':'standard','version':'3.0','subsystems':[{'subsystem':'arkcompiler','components':[{'component':'ets_runtime','features':[]}]}]}, open('productdefine/common/products/how_ark_mini.json','w'), indent=2)"
+          echo "== how_ark_mini.json 已写入 ==" | tee -a "$LOG"
           if [ -f build.sh ]; then
-            echo "== prebuilts_download（预编译工具链，量大需时）==" | tee -a "$LOG"
+            echo "== prebuilts_download（官方工具链，build.sh 硬依赖）==" | tee -a "$LOG"
             (timeout 2400 bash build/prebuilts_download.sh 2>&1 || true) | tail -10 | tee -a "$LOG"
-            echo "== build.sh --build-target ark_js_host_linux_tools_packages ==" | tee -a "$LOG"
-            (timeout 3000 bash build.sh --product-name hispark_taurus_standard \
+            echo "== build.sh --build-target ark_js_host_linux_tools_packages（只编译宿主工具子图）==" | tee -a "$LOG"
+            (timeout 3000 bash build.sh --product-name how_ark_mini \
                --build-target ark_js_host_linux_tools_packages 2>&1 || true) | tail -50 | tee -a "$LOG"
             echo "== 产物搜寻 ==" | tee -a "$LOG"
             (find out -type f \( -name 'ark_js_vm' -o -name 'es2abc' -o -name '*.abc' \) 2>/dev/null | head -10 || true) | tee -a "$LOG"
