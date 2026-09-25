@@ -139,7 +139,7 @@ jobs:
           # 其余为 build/tools_checker.py 要求的系统工具（消除 Missing dependencies）
           sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov gdb \
             ccache default-jdk libtinfo5 genext2fs u-boot-tools mtools mtd-utils scons \
-            gcc-arm-none-eabi ruby
+            gcc-arm-none-eabi ruby clang-14 g++-mingw-w64-x86_64
 
       - name: Clone arkcompiler_runtime_core (v4.1, CMake-able)
         run: |
@@ -289,6 +289,29 @@ jobs:
             echo "!! repo sync 后仍无根 build.sh（linkfile 未生成）" | tee -a "$LOG"
           fi
 
+      - name: Cross-compile runtime_core -> Windows x64 (upstream mingw toolchain)
+        run: |
+          LOG="$GITHUB_WORKSPACE/log-cross-win.txt"
+          echo "== runtime_core clang-14 -> x86_64-w64-mingw32（上游官方静态交叉工具链）==" | tee "$LOG"
+          cd arkcompiler_runtime_core
+          if [ -f static_core/CMakeLists.txt ]; then CORE=static_core; else CORE=.; fi
+          TC="$CORE/cmake/toolchain/cross-clang-14-x86_64-w64-mingw32-static.cmake"
+          [ -f "$TC" ] || TC=$(ls "$CORE"/cmake/toolchain/cross-*x86_64-w64-mingw32*.cmake 2>/dev/null | head -1)
+          if [ -z "$TC" ]; then
+            echo "!! 未找到 mingw 交叉工具链" | tee -a "$LOG"
+          else
+            echo "toolchain: $TC" | tee -a "$LOG"
+            (cmake -S "$CORE" -B build-win -GNinja \
+               -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/arkcompiler_runtime_core/$TC" \
+               -DCMAKE_BUILD_TYPE=Release \
+               -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
+               -DPANDA_ENABLE_COVERAGE=false -DPANDA_WITH_ETS=false \
+               && cmake --build build-win -j"$(nproc)") \
+               2>&1 | tail -45 | tee -a "$LOG" || true
+            echo "== 产物 .exe ==" | tee -a "$LOG"
+            (find build-win -name '*.exe' | head -20 || true) | tee -a "$LOG"
+          fi
+
       - name: Collect artifacts
         if: always()
         run: |
@@ -306,6 +329,11 @@ jobs:
             | grep -v '/gen/' | grep -v '/obj/' | head -40 | while read -r f; do
               cp "$f" out/bin/ 2>/dev/null || true
             done
+          # Windows x64 交叉编译产物（上游官方 mingw 工具链，全静态 exe）
+          mkdir -p out/bin-win
+          find arkcompiler_runtime_core/build-win -name '*.exe' -size -200M 2>/dev/null \
+            | head -30 | while read -r f; do cp "$f" out/bin-win/ 2>/dev/null || true; done
+          echo "bin-win:"; ls -la out/bin-win 2>/dev/null | head -15
           cp arkcompiler_runtime_core/deps-layout.txt out/log/ 2>/dev/null || true
           cp log-*.txt out/log/ 2>/dev/null || true
           cp ohos/sync-detail.log out/log/ 2>/dev/null || true
@@ -476,6 +504,8 @@ jobs:
           # 1.5) 真 Ark 运行时注入：兼容层窗口启动时自动探测 ark/ 并真实执行 modules.abc
           mkdir -p inject/ark/linux inject/ark/windows
           cp art/ark-runtime-ubuntu/bin/* inject/ark/linux/   2>/dev/null || true
+          # 优先用上游官方 mingw 交叉产物（静态 exe，直接可跑），MSVC 本机产物兜底
+          cp art/ark-runtime-ubuntu/bin-win/* inject/ark/windows/ 2>/dev/null || true
           cp art/ark-runtime-windows/bin/* inject/ark/windows/ 2>/dev/null || true
           # 控制体积：单文件 >120MB 丢弃
           find inject/ark -type f -size +120M -delete 2>/dev/null || true
