@@ -171,6 +171,18 @@ jobs:
           echo "== vixl CMakeLists 存在性 ==" | tee -a deps-layout.txt
           ls "$CORE_DIR/third_party/vixl/CMakeLists.txt" 2>/dev/null || echo "vixl/CMakeLists.txt 缺失" | tee -a deps-layout.txt
 
+      - name: Patch ruby generators (Ruby 3.x OpenStruct)
+        run: |
+          # Ruby 3.x 不再自动加载 ostruct，上游 gen.rb/merge.rb 直接用 OpenStruct 会 NameError
+          cd arkcompiler_runtime_core
+          if [ -f static_core/CMakeLists.txt ]; then CORE=static_core; else CORE=.; fi
+          grep -rl "OpenStruct" "$CORE" --include='*.rb' 2>/dev/null | while read -r f; do
+            if ! grep -q 'require .ostruct' "$f"; then
+              sed -i '1i require "ostruct"' "$f"
+              echo "patched: $f"
+            fi
+          done
+
       - name: Build arkcompiler_runtime_core (CMake)
         run: |
           cd arkcompiler_runtime_core
