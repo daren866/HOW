@@ -164,11 +164,13 @@ jobs:
           # 只装本 job 实际需要的：runtime_core Linux CMake + repo + mingw 交叉。
           # build.sh 全量构建已裁剪（v0.3.15），prebuilts 专用包
           # （default-jdk/libtinfo5/genext2fs/u-boot-tools/mtools/mtd-utils/scons/
-          #   gcc-arm-none-eabi/lcov）一并移除
+          #   gcc-arm-none-eabi）一并移除
           # v0.3.18 实测：gdb 必须保留 —— runtime_core cmake/CommonTesting.cmake:75
           # find_program(GDB) 在 configure 阶段强制查找，缺了直接 CMake Error
+          # v0.3.19 实测：lcov/genhtml 也必须保留 —— cmake/toolchain/coverage/
+          # unit_tests_lcov.cmake 无条件 SEND_ERROR 检查（与 COVERAGE 开关无关）
           sudo apt-get install -y cmake ninja-build g++ clang llvm python3 \
-            ccache ruby clang-14 g++-mingw-w64-x86-64 libdwarf-dev gdb
+            ccache ruby clang-14 g++-mingw-w64-x86-64 libdwarf-dev gdb lcov
           # libdwarf-dev: v0.3.9 实测 runtime_core Linux CMake 编译到 [132/1603] 时
           # libpandabase/os/stacktrace.cpp 缺 <libdwarf/libdwarf.h> 而失败
 
