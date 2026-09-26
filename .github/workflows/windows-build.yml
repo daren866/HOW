@@ -236,8 +236,13 @@ jobs:
           (cmake -S "$CORE_DIR" -B build -GNinja -DCMAKE_BUILD_TYPE=Release \
             -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
             -DPANDA_ENABLE_COVERAGE=false \
+            -DPANDA_WITH_ETS=false -DPANDA_WITH_COMPILER=false \
             -DCMAKE_C_FLAGS="-w" -DCMAKE_CXX_FLAGS="-w" \
             && cmake --build build -j"$(nproc)") 2>&1 | tee ../log-core.txt || true
+          # v0.3.19 实测：v4.1 默认 PANDA_WITH_ETS=ON 会触发 cross_values 嵌套
+          # configure 的 etsstdlib 引导（需要 es2panda 宿主二进制，鸡生蛋）→ 配置失败。
+          # 与 Windows 交叉 job 对齐关掉：字节码工具（ark_asm/ark_disasm/verifier）无需 ETS 插件；
+          # PANDA_WITH_COMPILER=false 同交叉 job（上游 vendored asmjit API 失配，Linux 侧同败）
           # v0.3.10 实测：越过 libdwarf 后（libdwarf-dev 已装），[178/1603] 死于 asmjit
           # vendored 代码被 GCC11 的 -Werror=shadow 升级（'src' shadows a member）；
           # 这是 bonus 构建，用 -w 全局压制告警升级（-w 优先级高于后续 -Werror）
