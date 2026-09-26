@@ -344,8 +344,11 @@ jobs:
               echo "toolchain already patched (skip)" | tee -a "$LOG"
             else
               printf '\n# HOW: clang 交叉需显式启用 mingw ANSI stdio（gcc 自动启用而 clang 不会）\n' >> "$TC"
-              printf 'set(CMAKE_C_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -D__USE_MINGW_ANSI_STDIO=1")\n' >> "$TC"
-              printf 'set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -D__USE_MINGW_ANSI_STDIO=1")\n' >> "$TC"
+              # v0.3.12 实测：交叉下 asmjit vendored 代码被 clang -Werror 连环拦（nested-anon-types/
+              # gnu-anonymous-struct/bitwise-instead-of-logical）；与 Linux 侧同理，-w 放头部压住
+              # 后续 -Wall/-Werror（run #69 Linux 编译行已实证该顺序有效）
+              printf 'set(CMAKE_C_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -D__USE_MINGW_ANSI_STDIO=1 -w")\n' >> "$TC"
+              printf 'set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -D__USE_MINGW_ANSI_STDIO=1 -w")\n' >> "$TC"
               echo "toolchain patched in place: $TC" | tee -a "$LOG"
             fi
             (cmake -S "$CORE" -B build-win -GNinja \
@@ -354,9 +357,13 @@ jobs:
                -DCMAKE_BUILD_TYPE=Release \
                -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
                -DPANDA_ENABLE_COVERAGE=false -DPANDA_WITH_ETS=false \
+               -DPANDA_WITH_COMPILER=false \
                && cmake --build build-win -j"$(nproc)" -- -k 200) \
                2>&1 | tail -80 | tee -a "$LOG" || true
             # -k 200：单文件失败不停止，最大化收割已链接成功的 .exe 工具
+            # PANDA_WITH_COMPILER=false（v0.3.12 实测）：asmjit 仅服务 codegen/AOT，且上游 vendored
+            # asmjit 与钉版 panda 代码存在 API 失配（CodeHolder 构造签名，Linux 侧同败）。
+            # 关掉后交叉只产纯字节码工具（assembler/disassembler/verifier 等），成功率最大化
             # v0.3.9 实测：clang 交叉编译时 mingw 头不声明 snprintf/vsnprintf（gcc 会自动启用
             # mingw-ansi stdio 而 clang 不会）→ cstdio 'using ::snprintf' 报 no member；
             # 显式定义 __USE_MINGW_ANSI_STDIO=1 后映射到 __mingw_snprintf 等已声明函数
