@@ -357,13 +357,23 @@ jobs:
                -DCMAKE_BUILD_TYPE=Release \
                -DPANDA_ENABLE_CLANG_TIDY=false -DPANDA_ENABLE_TESTS=false \
                -DPANDA_ENABLE_COVERAGE=false -DPANDA_WITH_ETS=false \
-               -DPANDA_WITH_COMPILER=false \
-               && cmake --build build-win -j"$(nproc)" -- -k 200) \
-               2>&1 | tail -80 | tee -a "$LOG" || true
-            # -k 200：单文件失败不停止，最大化收割已链接成功的 .exe 工具
+               -DPANDA_WITH_COMPILER=false) \
+               2>&1 | tee "$GITHUB_WORKSPACE/log-cross-win-conf.txt" | tail -25 | tee -a "$LOG" || true
             # PANDA_WITH_COMPILER=false（v0.3.12 实测）：asmjit 仅服务 codegen/AOT，且上游 vendored
             # asmjit 与钉版 panda 代码存在 API 失配（CodeHolder 构造签名，Linux 侧同败）。
             # 关掉后交叉只产纯字节码工具（assembler/disassembler/verifier 等），成功率最大化
+            if [ -f build-win/build.ninja ]; then
+              # 阶段1（v0.3.13 教训）：全量构建被 tools/sampler 单点失败阻塞（ninja -k 耗尽/依赖阻塞），
+              # 核心字节码工具轮不到链接 → 改为最优先精准构建；-k 0 单文件失败不停，三工具独立出 exe
+              echo "== 阶段1：核心字节码工具优先（ark_asm / ark_disasm / verifier）==" | tee -a "$LOG"
+              (cmake --build build-win -j"$(nproc)" --target ark_asm ark_disasm verifier -- -k 0) \
+                2>&1 | tee "$GITHUB_WORKSPACE/log-cross-win-stage1.txt" | tail -40 | tee -a "$LOG" || true
+              echo "== 阶段2：全量尽力（完整日志随产物上传）==" | tee -a "$LOG"
+              (cmake --build build-win -j"$(nproc)" -- -k 200) \
+                2>&1 | tee "$GITHUB_WORKSPACE/log-cross-win-stage2.txt" | tail -40 | tee -a "$LOG" || true
+            else
+              echo "!! 交叉 configure 失败（完整输出见 log-cross-win-conf.txt）" | tee -a "$LOG"
+            fi
             # v0.3.9 实测：clang 交叉编译时 mingw 头不声明 snprintf/vsnprintf（gcc 会自动启用
             # mingw-ansi stdio 而 clang 不会）→ cstdio 'using ::snprintf' 报 no member；
             # 显式定义 __USE_MINGW_ANSI_STDIO=1 后映射到 __mingw_snprintf 等已声明函数
@@ -584,8 +594,8 @@ jobs:
             echo "  本 ark/ 目录只是引擎增强包：有则自动用真 Ark，无则照样跑。"
             echo ""
             echo "- windows/: 上游 runtime_core 经官方 mingw 交叉工具链产出的 Windows 原生 exe"
-            echo "            （ark_disasm / pandasm / verifier 等字节码工具，可直接双击命令行使用；"
-            echo "             HOW.exe 会优先探测其中的 ark_js_vm.exe，缺席时自动回退 HOWVM）"
+            echo "            （ark_asm / ark_disasm / verifier 字节码工具 + Zydis 原生反汇编套件，"
+            echo "             可直接在命令行使用；HOW.exe 会优先探测其中的 ark_js_vm.exe，缺席时回退 HOWVM）"
             echo "- linux/:   Linux 版 ark_js_vm / libark_jsruntime.so 等（真实 ets_runtime 宿主工具链，"
             echo "            仅供装有 WSL 的机器经 wsl.exe 调用；无 WSL 可整个删除本目录省空间）"
             echo ""
