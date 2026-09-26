@@ -185,8 +185,10 @@ static void measure(UINode *nd, int availW, HDC hdc, Sz *out) {
             else { mainSum += cs.w; if (cs.h > crossMax) crossMax = cs.h; }
         }
         if (nd->nch > 1) mainSum += gap * (nd->nch - 1);
-        s.w = crossMax + p2;
-        s.h = mainSum + p2;
+        /* 主轴→长度，交叉轴→最大子尺寸（row 的主轴是横向！此前 row 宽高写反，
+         * 导致 row 内按钮整体右移/溢出 —— 像素门禁在 CI 真机抓到的错位根因） */
+        if (isCol) { s.h = mainSum + p2; s.w = crossMax + p2; }
+        else       { s.w = mainSum + p2; s.h = crossMax + p2; }
     }
     /* 显式尺寸覆盖 */
     if (nd->hasW == 1 && nd->w > 0) s.w = nd->w;
@@ -246,6 +248,8 @@ static void arrange(UINode *nd, int x, int y, int w, int h, HDC hdc) {
         else if (strcmp(c->align, "end") == 0) cpos = cross - (col ? cw : chh);
         else if (strcmp(c->align, "stretch") == 0) stretch = 1;
         else cpos = (cross - (col ? cw : chh)) / 2;
+        /* 负偏移钳制：子项比容器宽时居中/尾对齐不得画出容器外 */
+        if (cpos < 0) cpos = 0;
         if (stretch) {
             if (col) cw = iw; else chh = ih;
             cpos = 0;
