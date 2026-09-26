@@ -141,7 +141,9 @@ jobs:
   ark-runtime:
     name: Upstream Ark runtime (Ubuntu x64)
     runs-on: ubuntu-22.04
-    timeout-minutes: 240
+    # v0.3.15 裁剪后 job 实际负载：runtime_core CMake ~25min + repo sync 5 项目 ~15min
+    # + mingw 交叉 ~20min ≈ 60min 内可完成，timeout 相应收紧（原 240）
+    timeout-minutes: 120
     continue-on-error: true
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     steps:
@@ -154,24 +156,23 @@ jobs:
           key: ohos-ccache-${{ github.run_id }}
           restore-keys: |
             ohos-ccache-
-        # v0.3.9 实测冷启动 ninja 3270s（命中率 4.4%，缓存 0.12GB）；
-        # 命中后可显著缩短宿主工具子图编译
+      # ccache: runtime_core Linux CMake 重复构建提速
 
       - name: Install deps
         run: |
           sudo apt-get update
-          # libtinfo5: prebuilts clang 链接依赖（22.04 才有此包）；
-          # 其余为 build/tools_checker.py 要求的系统工具（消除 Missing dependencies）
-          sudo apt-get install -y cmake ninja-build g++ clang llvm python3 lcov gdb \
-            ccache default-jdk libtinfo5 genext2fs u-boot-tools mtools mtd-utils scons \
-            gcc-arm-none-eabi ruby clang-14 g++-mingw-w64-x86-64 libdwarf-dev
+          # 只装本 job 实际需要的：runtime_core Linux CMake + repo + mingw 交叉。
+          # build.sh 全量构建已裁剪（v0.3.15），prebuilts 专用包
+          # （default-jdk/libtinfo5/genext2fs/u-boot-tools/mtools/mtd-utils/scons/
+          #   gcc-arm-none-eabi/lcov/gdb）一并移除
+          sudo apt-get install -y cmake ninja-build g++ clang llvm python3 \
+            ccache ruby clang-14 g++-mingw-w64-x86-64 libdwarf-dev
           # libdwarf-dev: v0.3.9 实测 runtime_core Linux CMake 编译到 [132/1603] 时
           # libpandabase/os/stacktrace.cpp 缺 <libdwarf/libdwarf.h> 而失败
 
       - name: Clone arkcompiler_runtime_core (v4.1, CMake-able)
         run: |
           # runtime_core 用 v4.1-Release：该版本保留可用的独立 CMake 构建（master 已转向 GN）
-          # ets_runtime 不再单独 clone：master 无独立构建入口，改由下一步 repo sync 拉全树
           git clone --depth 1 --branch OpenHarmony-v4.1-Release https://github.com/OpenHarmony/arkcompiler_runtime_core.git
 
       - name: Install third-party deps (official script)
@@ -240,42 +241,38 @@ jobs:
           # 这是 bonus 构建，用 -w 全局压制告警升级（-w 优先级高于后续 -Werror）
           tail -25 ../log-core.txt || true
 
-      - name: Build arkcompiler_ets_runtime (repo sync 依赖子集 + 迷你产品单模块编译)
+      - name: Sync OpenHarmony source subset (5 repos, ~1GB)
         run: |
           LOG="$GITHUB_WORKSPACE/log-ets.txt"
-          echo "== OHOS repo sync 实验（$(date -u +%FT%TZ)）==" | tee "$LOG"
+          echo "== OHOS repo sync 精确子集（$(date -u +%FT%TZ)）==" | tee "$LOG"
           # repo 启动器：官方源直连（apt 的 repo 包版本过旧）
           sudo curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o /usr/local/bin/repo
           sudo chmod a+x /usr/local/bin/repo
           repo version 2>/dev/null | head -2 | tee -a "$LOG"
           git config --global user.email "ci@how.local"
           git config --global user.name "HOW CI"
-          # 实测要点（本地沙箱已验证，commit 019fdc7 前后）：
+          # v0.3.15 裁剪（用户确认：免费 Actions 资源受限，"源码树编译，只编译我需要的模块就OK"）：
+          #  - 删除 prebuilts_download（官方工具链数 GB 下载 + npm，最重的一段）
+          #  - 删除 build.sh --build-target（即使只编宿主工具子图，ninja 也要 1~2 小时）
+          #  - 删除迷你产品 json / 组件白名单（均为 build.sh 服务的胶水）
+          #  - sync 名单从 22 项目精简回 5 个核心项目（浅克隆约 1GB，实测 10~15 分钟）
+          #  - 真正进 Release 的运行时产物以 runtime_core v4.1 CMake 构建（本 job 后续步骤
+          #    + Windows 交叉 job）为准；ets_runtime master 源码树仅作参考与后续接入研究
+          # repo 实测要点（本地沙箱已验证，commit 019fdc7 前后）：
           #  - manifest 用 GitHub 镜像；master 分支项目 remote 已迁至 gitcode.com
-          #  - manifest 无 arkcompiler group，旧 -g default,arkcompiler 写法无效
-          #  - 按项目名精确同步（浅克隆）；build 项目 linkfile 在树根生成 build.sh/build.py/.gn
-          #  - 只拉需要的模块：核心 + ets_runtime 实际引用的依赖仓库（external_deps 驱动，
-          #    名单已逐一在 manifest 验证；cJSON 大写、commonlibrary_c_utils 等易踩坑）
-          #  - 不做全量树同步；迷你产品 json 只含 arkcompiler/ets_runtime，
-          #    build.sh --build-target 只编译宿主工具子图，符合公开仓库 Actions 资源约束
+          #  - manifest 无 arkcompiler group，旧 -g default,arkcompiler 写法无效，必须按名精确同步
+          #  - build 项目 linkfile 在树根生成 build.sh/build.py/.gn（如未来需要可复用）
           mkdir -p ohos && cd ohos
           echo "== repo init（GitHub manifest 镜像，浅克隆）==" | tee -a "$LOG"
           (repo init -u https://github.com/OpenHarmony/manifest.git -b master \
              --manifest-depth=1 --depth=1 \
              --repo-url=https://github.com/GerritCodeReview/git-repo.git \
              --no-clone-bundle 2>&1 || true) | tail -5 | tee -a "$LOG"
-          echo "== 按项目名同步（构建链依赖子集，重试 3 次）==" | tee -a "$LOG"
+          echo "== 按项目名同步（5 核心项目，重试 3 次）==" | tee -a "$LOG"
           for i in 1 2 3; do
             repo sync -c -j4 --no-tags \
-              build productdefine_common \
-              arkcompiler_ets_runtime arkcompiler_ets_frontend arkcompiler_runtime_core \
-              commonlibrary_c_utils \
-              third_party_icu third_party_zlib third_party_libuv third_party_protobuf \
-              third_party_cJSON third_party_json third_party_bounds_checking_function \
-              third_party_abseil-cpp third_party_googletest third_party_pcre2 \
-              third_party_flatbuffers global_i18n hiviewdfx_hilog \
-              resourceschedule_qos_manager testfwk_developer_test \
-              developtools_integration_verification \
+              build arkcompiler_ets_runtime arkcompiler_ets_frontend \
+              arkcompiler_runtime_core commonlibrary_c_utils \
               > sync-detail.log 2>&1
             rc=$?
             tail -8 sync-detail.log | tee -a "$LOG"
@@ -286,55 +283,9 @@ jobs:
           done
           echo "== 同步结果 ==" | tee -a "$LOG"
           (repo list 2>/dev/null || true) | tee -a "$LOG"
-          (du -sh arkcompiler/* build productdefine third_party/* 2>/dev/null || true) | tee -a "$LOG"
-          (ls -la build.sh build.py .gn 2>/dev/null || true) | tee -a "$LOG"
-          # 迷你产品：只含 arkcompiler/ets_runtime —— 官方机制下"只编译需要的模块"
-          python3 -c "import json,os; os.makedirs('productdefine/common/products', exist_ok=True); json.dump({'product_name':'how_ark_mini','device_company':'ohos','board':'x86_64','target_cpu':'x86_64','type':'standard','version':'3.0','compile_mode':'host','subsystems':[{'subsystem':'arkcompiler','components':[{'component':'ets_runtime','features':[]}]}]}, open('productdefine/common/products/how_ark_mini.json','w'), indent=2)"
-          echo "== how_ark_mini.json 已写入 ==" | tee -a "$LOG"
-          # 组件白名单：hb _cropping_components 只保留 src 部件 + 白名单组件，
-          # libuv/protobuf/abseil-cpp 等不在内置表 → 用 out/products_ext 官方覆盖钩子补全
-          python3 -c "
-          import json, os, glob
-          base = json.load(open('build/third_party_allow_list.json'))
-          try: auto = json.load(open('build/auto_install_whitelist.json'))
-          except Exception: auto = []
-          extra = ['ets_runtime','ets_frontend','runtime_core','c_utils','hilog','i18n','qos_manager','build_framework']
-          for f in glob.glob('third_party/*/bundle.json') + glob.glob('*/*/bundle.json'):
-              try: extra.append(json.load(open(f))['component']['name'])
-              except Exception: pass
-          merged = sorted(set(base) | set(auto) | set(extra))
-          os.makedirs('out/products_ext', exist_ok=True)
-          json.dump(merged, open('out/products_ext/third_party_allow_list.json','w'), indent=2)
-          print('products_ext allow list:', len(merged))"
-          echo "== products_ext 白名单已写 ==" | tee -a "$LOG"
-          if [ -f build.sh ]; then
-            echo "== prebuilts_download（官方工具链，build.sh 硬依赖，重试 3 次）==" | tee -a "$LOG"
-            # npm registry 预设为华为云镜像（上一轮 npm install 默认源抖动失败）
-            npm config set registry https://repo.huaweicloud.com/repository/npm/ || true
-            for i in 1 2 3; do
-              (timeout 2400 bash build/prebuilts_download.sh 2>&1 || true) | tail -6 | tee -a "$LOG"
-              # build.sh 硬依赖 prebuilts/python 与 build-tools，以此判成功
-              if ls prebuilts/python/linux-x86/*/bin/python3 >/dev/null 2>&1 \
-                 && [ -d prebuilts/build-tools ]; then
-                echo "prebuilts 就绪（第 $i 次）" | tee -a "$LOG"; break
-              fi
-            done
-            # hb 需要 jinja2/yaml（prebuilts python 自带 pip）
-            PY3=$(ls prebuilts/python/linux-x86/*/bin/python3 2>/dev/null | tail -1)
-            if [ -n "$PY3" ]; then
-              ("$PY3" -m pip install jinja2 pyyaml 2>&1 || true) | tail -3 | tee -a "$LOG"
-            fi
-            echo "== build.sh --build-target ark_js_host_linux_tools_packages（只编译宿主工具子图）==" | tee -a "$LOG"
-            # v0.3.8 实测：ninja 走到 2058/2068（ark_js_vm main.o 编译中）被 3000s 杀掉，仅差约 10 步。
-            # 提到 4500s（整个 job 预算 240min，本步之前累计仅 ~67min，余量充足）。
-            (timeout 4500 bash build.sh --product-name how_ark_mini \
-               --build-target ark_js_host_linux_tools_packages \
-               --gn-args is_host_product=true 2>&1 || true) | tail -80 | tee -a "$LOG"
-            echo "== 产物搜寻 ==" | tee -a "$LOG"
-            (find out -type f \( -name 'ark_js_vm' -o -name 'es2abc' -o -name '*.abc' \) 2>/dev/null | head -10 || true) | tee -a "$LOG"
-          else
-            echo "!! repo sync 后仍无根 build.sh（linkfile 未生成）" | tee -a "$LOG"
-          fi
+          (du -sh arkcompiler/* build commonlibrary 2>/dev/null || true) | tee -a "$LOG"
+          echo "== 磁盘占用（裁剪后应远低于全量树）==" | tee -a "$LOG"
+          (du -sh . 2>/dev/null || true) | tee -a "$LOG"
 
       - name: Cross-compile runtime_core -> Windows x64 (upstream mingw toolchain)
         run: |
@@ -423,13 +374,6 @@ jobs:
             \( -name 'ark_*' -o -name 'pandasm' -o -name 'paoc' -o -name 'verifier' \
                -o -name 'libark*' \) -size -300M 2>/dev/null \
             | grep -v '\.cpp$' | head -40 | while read -r f; do
-              cp "$f" out/bin/ 2>/dev/null || true
-            done
-          # repo sync 迷你产品编译产物：宿主工具 + 全部运行时依赖 so（含 libhmicui18n 等）
-          find ohos/out/host -type f -executable \
-            \( -name '*.so' -o -name '*.so.*' -o -name 'ark_*' -o -name 'profdump' \
-               -o -name 'quick_fix' \) -size -200M 2>/dev/null \
-            | grep -v '/gen/' | grep -v '/obj/' | head -40 | while read -r f; do
               cp "$f" out/bin/ 2>/dev/null || true
             done
           # Windows x64 交叉编译产物（上游官方 mingw 工具链，全静态 exe）
