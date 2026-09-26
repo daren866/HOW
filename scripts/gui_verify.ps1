@@ -32,13 +32,28 @@ public class HW {
   public struct R { public int L,T,Rt,B; }
 }
 "@
-  # 轮询最多 ~12s 等兼容层窗口出现
+  # 轮询最多 ~12s 等兼容层窗口出现（PID+类名枚举查找，比 FindWindow 可靠：
+  # PS 将 $null 标题参数封送为空串会使 FindWindow 匹配不到非空标题窗口）
+  $script:targetPid = $p.Id
   $h = [IntPtr]::Zero
-  for ($i = 0; $i -lt 12; $i++) {
+  for ($i = 0; $i -lt 12 -and $h -eq [IntPtr]::Zero; $i++) {
     Start-Sleep -Seconds 1
-    $h = [HW]::FindWindowW("HOW_COMPAT_WND", $null)
-    if ($h -ne [IntPtr]::Zero -and [HW]::IsWindow($h)) { break }
-    $h = [IntPtr]::Zero
+    $script:foundHwnd = [IntPtr]::Zero
+    $finder = {
+      param($wh, $l)
+      $wpid = 0
+      [HW]::GetWindowThreadProcessId($wh, [ref]$wpid) | Out-Null
+      if ($wpid -eq $script:targetPid) {
+        $c = New-Object System.Text.StringBuilder 256
+        [HW]::GetClassName($wh, $c, 256) | Out-Null
+        if ($c.ToString() -eq "HOW_COMPAT_WND") { $script:foundHwnd = $wh; return $false }
+      }
+      return $true
+    }
+    [HW]::EnumWindows($finder, [IntPtr]::Zero) | Out-Null
+    $h = $script:foundHwnd
+    if ($h -ne [IntPtr]::Zero -and -not [HW]::IsWindow($h)) { $h = [IntPtr]::Zero }
+    if ($h -ne [IntPtr]::Zero) { break }
     if ($i -eq 5) {
       # 进程还活着吗？
       $alive = $false
