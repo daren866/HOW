@@ -37,6 +37,21 @@ jobs:
           else { Write-Host "!! selftest-report.txt 未生成"; Get-ChildItem | Format-Table Name }
           exit $p.ExitCode
 
+      - name: GUI 渲染实证（真桌面 --show 兼容层窗口 + 截图 + 像素签名）
+        shell: pwsh
+        run: ./scripts/gui_verify.ps1
+
+      - name: Upload 渲染实证 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-render-proof
+          if-no-files-found: ignore
+          path: |
+            compat-window.png
+            selftest-render.bmp
+            selftest-report.txt
+
       - name: Package zip
         shell: pwsh
         run: |

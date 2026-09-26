@@ -312,6 +312,19 @@ void ui_render(RtState *rt, HDC hdc, RECT rcPage) {
         arrange(rt->root, rcPage.left, rcPage.top,
                 rcPage.right - rcPage.left, rcPage.bottom - rcPage.top, hdc);
         draw_node(rt->root, hdc);
+    } else {
+        /* 页面未加载兜底：干净底色 + 居中提示（绝不留空/噪点） */
+        HBRUSH br = CreateSolidBrush(RGB(0xF1, 0xF3, 0xF5));
+        FillRect(hdc, &rcPage, br);
+        DeleteObject(br);
+        HFONT of = (HFONT)SelectObject(hdc, rt_getfont(rt, 14, 0));
+        SetTextColor(hdc, RGB(0x99, 0xA0, 0xA8));
+        SetBkMode(hdc, TRANSPARENT);
+        wchar_t hint[128];
+        u8w("页面未加载 · 未找到 pages/index.json 或解析失败", hint, 128);
+        DrawTextW(hdc, hint, -1, &rcPage,
+                  DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+        SelectObject(hdc, of);
     }
     /* Toast 悬浮层 */
     if (rt->toastOn && GetTickCount() - rt->toastTick < 2000) {

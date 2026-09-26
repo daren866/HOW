@@ -11,7 +11,7 @@ HOW 是一个把 **OpenHarmony / ArkUI 应用生态向 Windows x64 迁移** 的�
 - 主窗口 **「HOW - x64转译arm模式」**
   - 中部列表展示每个已安装 HAP 应用的**应用名称**
   - 底部 **「安装hap」** 按钮：选择 `.hap` 文件 → 解析 `app.json5` → 弹出确认框 → 解压安装到 `%APPDATA%\HOW\apps\<bundleName>\`
-- 单击列表项 → 创建 **「{App name} 兼容层」** 新窗口，启动运行时并渲染该应用
+- 双击列表项 → 创建 **「{App name} 兼容层」** 新窗口，启动运行时并渲染该应用
 - 每个 HAP 包含 `ets/modules.abc`（Panda 容器）与 `pages/index.json`（ArkUI 声明式 UI 描述）
 
 ## HOW Runtime 架构
@@ -99,7 +99,7 @@ make -f scripts/Makefile.mingw XP=1 CC=gcc HOW=HOW.exe
 
 1. 启动 `HOW.exe`
 2. 点击 **安装hap** → 选择仓库内 `samples/MyFirstDemo.hap` → 确认安装
-3. 双击/单击列表中的 **你好方舟** → 打开「你好方舟 兼容层」窗口
+3. 双击列表中的 **你好方舟** → 打开「你好方舟 兼容层」窗口
 4. 点击 `+ 1` 按钮：HOWVM 执行 `.abc` 中的 `onPlus` 字节码并刷新渲染
 
 ## 上游仓库映射（Roadmap）

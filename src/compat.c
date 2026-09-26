@@ -7,6 +7,10 @@
 
 static const wchar_t WC_COMPAT[] = L"HOW_COMPAT_WND";
 
+/* --show 模式：兼容层窗口关闭时退出进程（GUI 自动化验证用） */
+static int g_quitOnClose;
+void compat_set_quit_on_close(int on) { g_quitOnClose = on; }
+
 static void draw_toolbar(HDC hdc, RECT rcT, const wchar_t *title,
                          const wchar_t *engineTag) {
     HBRUSH br = CreateSolidBrush(RGB(0x18, 0x24, 0x31));
@@ -86,6 +90,25 @@ static void draw_logpane(HDC hdc, RECT rcL, RtState *rt) {
     DeleteObject(f);
 }
 
+/* 兼容层窗口整面绘制（WM_PAINT 与离屏像素验证共用同一条路径）
+ * pw/ph 为客户区尺寸；title 为窗口标题（工具栏显示）。 */
+void compat_paint(RtState *rt, HDC hdc, int pw, int ph, const wchar_t *title) {
+    /* 区域划分：工具栏 / 页面 / 日志 */
+    RECT rcAll = {0, 0, pw, ph};
+    RECT rcT = {0, 0, pw, TOOLBAR_H};
+    RECT rcPage = {0, TOOLBAR_H, pw, ph - LOG_H};
+    RECT rcLog = {0, ph - LOG_H, pw, ph};
+    /* 先整面铺深色底：未覆盖区域绝不遗留未初始化噪点（花屏问题防御） */
+    {
+        HBRUSH base = CreateSolidBrush(RGB(0x0C, 0x11, 0x16));
+        FillRect(hdc, &rcAll, base);
+        DeleteObject(base);
+    }
+    draw_toolbar(hdc, rcT, title, rt->engineTag[0] ? rt->engineTag : NULL);
+    ui_render(rt, hdc, rcPage);
+    draw_logpane(hdc, rcLog, rt);
+}
+
 static LRESULT CALLBACK compat_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     RtState *rt = (RtState *)GetPropW(hwnd, L"HOW_RT");
     switch (msg) {
@@ -105,15 +128,9 @@ static LRESULT CALLBACK compat_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         HDC mem = CreateCompatibleDC(hdc);
         HBITMAP bm = CreateCompatibleBitmap(hdc, pw, ph);
         HBITMAP ob = (HBITMAP)SelectObject(mem, bm);
-        /* 区域划分：工具栏 / 页面 / 日志 */
-        RECT rcT = {0, 0, pw, TOOLBAR_H};
-        RECT rcPage = {0, TOOLBAR_H, pw, ph - LOG_H};
-        RECT rcLog = {0, ph - LOG_H, pw, ph};
         wchar_t title[192];
         GetWindowTextW(hwnd, title, 192);
-        draw_toolbar(mem, rcT, title, rt->engineTag[0] ? rt->engineTag : NULL);
-        ui_render(rt, mem, rcPage);
-        draw_logpane(mem, rcLog, rt);
+        compat_paint(rt, mem, pw, ph, title);
         BitBlt(hdc, 0, 0, pw, ph, mem, 0, 0, SRCCOPY);
         SelectObject(mem, ob);
         DeleteObject(bm);
@@ -141,6 +158,7 @@ static LRESULT CALLBACK compat_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DESTROY:
         KillTimer(hwnd, 1);
         if (rt) { rt_destroy(rt); RemovePropW(hwnd, L"HOW_RT"); }
+        if (g_quitOnClose) PostQuitMessage(0);
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
@@ -258,6 +276,14 @@ void compat_open(HINSTANCE hInst, AppInfo *app) {
     HWND hwnd = CreateWindowExW(0, WC_COMPAT, title,
                                 WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
                                 x, y, w, h, NULL, NULL, hInst, rt);
+    if (!hwnd) {
+        rt_log(rt, "[fatal] CreateWindowExW 失败 (err=%lu) —— 兼容层窗口无法创建", GetLastError());
+        rt_destroy(rt);
+        MessageBoxW(NULL, L"\u521b\u5efa\u517c\u5bb9\u5c42\u7a97\u53e3\u5931\u8d25", L"HOW Runtime", MB_OK | MB_ICONERROR);
+        return;
+    }
     ShowWindow(hwnd, SW_SHOW);
     UpdateWindow(hwnd);
+    /* 某些桌面环境下新窗口会落在主窗口之后，被误认为“没打开/没渲染” */
+    SetForegroundWindow(hwnd);
 }

@@ -1,10 +1,12 @@
 /* main.c - HOW 宿主主窗口
  *  标题 “HOW - x64转译arm模式”，中部为已安装 HAP 应用列表，
- *  底部 “安装hap” 按钮 → 选择 .hap → 确认 → 安装；单击列表项打开兼容层窗口。
+ *  底部 “安装hap” 按钮 → 选择 .hap → 确认 → 安装；双击列表项打开兼容层窗口。
+ *  另支持 --show <bundle>：直接打开指定应用的兼容层窗口（GUI 自动化验证用）。
  */
 #include "how.h"
 #include <windowsx.h>
 #include <commdlg.h>
+#include <shellapi.h>
 
 #define IDC_LIST   1001
 #define IDC_BTN    1002
@@ -76,7 +78,7 @@ static void do_install(HWND hwnd) {
         if (dot) *dot = 0;
         w2u8(nm, nameU8, 128);
     }
-    if (!bundleU8[0]) snprintf(bundleU8, 128, "unknown.%d", GetTickCount() % 100000);
+    if (!bundleU8[0]) snprintf(bundleU8, 128, "unknown.%lu", (unsigned long)(GetTickCount() % 100000));
 
     wchar_t msg[1024], wname[128], wbundle[128], wver[64];
     u8w(nameU8, wname, 128);
@@ -113,6 +115,30 @@ static void open_compat(HWND hwnd, int idx) {
     compat_open(GetModuleHandleW(NULL), &g.apps[idx]);
 }
 
+/* --show <bundle>：直接打开指定应用的兼容层窗口（GUI 自动化验证用）。
+ * 窗口关闭后进程退出。返回码：0 正常；2 未找到指定应用。 */
+static int run_show_mode(HINSTANCE hInst, const wchar_t *bundleW) {
+    compat_register(hInst);
+    AppInfo apps[MAX_APPS];
+    int n = store_list(apps, MAX_APPS);
+    int hit = -1;
+    for (int i = 0; i < n; i++)
+        if (_wcsicmp(apps[i].bundle, bundleW) == 0) { hit = i; break; }
+    if (hit < 0) {
+        MessageBoxW(NULL, L"\u672a\u627e\u5230\u6307\u5b9a\u5e94\u7528\uff08\u8bf7\u5148\u5b89\u88c5 hap \u6216\u68c0\u67e5 bundle \u540d\uff09",
+                    L"HOW --show", MB_OK | MB_ICONERROR);
+        return 2;
+    }
+    compat_set_quit_on_close(1);
+    compat_open(hInst, &apps[hit]);
+    MSG m;
+    while (GetMessageW(&m, NULL, 0, 0) > 0) {
+        TranslateMessage(&m);
+        DispatchMessageW(&m);
+    }
+    return 0;
+}
+
 static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_CREATE: {
@@ -125,7 +151,7 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                             hwnd, (HMENU)(INT_PTR)IDC_HEADER, NULL, NULL);
         SendMessageW(h, WM_SETFONT, (WPARAM)g.fontBig, TRUE);
         h = CreateWindowExW(0, L"STATIC",
-                            L"\u5355\u51fb\u5e94\u7528\u6253\u5f00\u517c\u5bb9\u5c42\u7a97\u53e3 \u00b7 HOW Runtime \u52a0\u8f7d .abc \u5e76\u6e32\u67d3",
+                            L"\u53cc\u51fb\u5e94\u7528\u6253\u5f00\u517c\u5bb9\u5c42\u7a97\u53e3 \u00b7 HOW Runtime \u52a0\u8f7d .abc \u5e76\u6e32\u67d3",
                             WS_CHILD | WS_VISIBLE, 0, 0, 0, 0,
                             hwnd, (HMENU)(INT_PTR)IDC_HINT, NULL, NULL);
         SendMessageW(h, WM_SETFONT, (WPARAM)f, TRUE);
@@ -151,12 +177,10 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_COMMAND: {
         int id = LOWORD(wp), code = HIWORD(wp);
         if (id == IDC_BTN && code == BN_CLICKED) do_install(hwnd);
-        else if (id == IDC_LIST && code == LBN_SELCHANGE) {
-            /* 仅鼠标单击触发（键盘导航不弹窗） */
-            if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
-                int sel = (int)SendMessageW(GetDlgItem(hwnd, IDC_LIST), LB_GETCURSEL, 0, 0);
-                open_compat(hwnd, sel);
-            }
+        else if (id == IDC_LIST && code == LBN_DBLCLK) {
+            /* 双击列表项打开兼容层窗口（单击仅选中，不再弹窗） */
+            int sel = (int)SendMessageW(GetDlgItem(hwnd, IDC_LIST), LB_GETCURSEL, 0, 0);
+            open_compat(hwnd, sel);
         }
         return 0;
     }
@@ -176,10 +200,21 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show) {
-    (void)hPrev; (void)cmd;
+    (void)hPrev;
     /* 无界面自测模式：HOW.exe --selftest（CI 兼容层运行验证门禁） */
     if (wcsstr(GetCommandLineW(), L"--selftest"))
         return run_selftest(hInst);
+    /* GUI 自动化验证模式：HOW.exe --show <bundle> —— 直接打开兼容层窗口 */
+    {
+        int argc = 0;
+        wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+        if (argv && argc >= 3 && wcscmp(argv[1], L"--show") == 0) {
+            int rc = run_show_mode(hInst, argv[2]);
+            LocalFree(argv);
+            return rc;
+        }
+        if (argv) LocalFree(argv);
+    }
     WNDCLASSW wc;
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc = main_proc;

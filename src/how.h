@@ -109,6 +109,9 @@ const wchar_t *arkrt_engine_name(HowEngine t); /* 引擎徽标显示名 */
 /* ---------------- 兼容层窗口 ---------------- */
 void compat_register(HINSTANCE hInst);
 void compat_open(HINSTANCE hInst, AppInfo *app);
+void compat_set_quit_on_close(int on);                /* --show 模式：关窗即退出 */
+void compat_paint(RtState *rt, HDC hdc, int pw, int ph,
+                  const wchar_t *title);              /* 整面绘制（WM_PAINT 与像素验证共用） */
 
 /* ---------------- 自测（--selftest） ---------------- */
 int run_selftest(HINSTANCE hInst);
