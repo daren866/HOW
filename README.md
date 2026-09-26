@@ -63,7 +63,11 @@ HAP 包 (zip)
 3. 均不可用                            → 内置 HOWVM 引擎兜底（纯原生，无外部依赖）
 ```
 
-当前引擎显示在兼容层窗口工具栏徽标（真 Ark 运行时 / HOW Runtime · HOWVM 引擎），
+> **没有 WSL 也能完整使用**：HOW.exe 本身是纯原生 Windows 程序，双击即用，
+> 内置 HOWVM 引擎是默认运行路径，不依赖 WSL/Linux。`ark/linux/` 仅供 WSL 用户
+> 选用 Linux 版真 Ark，无 WSL 可整个删除省空间；`ark/windows/` 的原生 exe 工具
+> 则无需任何环境即可命令行使用。当前引擎显示在兼容层窗口工具栏徽标
+> （真 Ark 运行时 / HOW Runtime · HOWVM 引擎），
 探测与真实执行证据（含上游运行时 stdout）输出在窗口底部日志面板。
 执行失败/超时（20s）自动回退 HOWVM，UI 动作链路永不阻塞。
 
