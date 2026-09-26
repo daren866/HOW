@@ -349,7 +349,26 @@ jobs:
               # 后续 -Wall/-Werror（run #69 Linux 编译行已实证该顺序有效）
               printf 'set(CMAKE_C_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -D__USE_MINGW_ANSI_STDIO=1 -w")\n' >> "$TC"
               printf 'set(CMAKE_CXX_FLAGS_INIT "${CMAKE_CXX_FLAGS_INIT} -D__USE_MINGW_ANSI_STDIO=1 -w")\n' >> "$TC"
+              # v0.3.14 实测：SHARED 目标（third_party icu 的 libinit_icu.dll）链接报
+              # cannot find -lstdc++/-lgcc —— 工具链原文件只给 EXE 配了 -L/静态参数，
+              # SHARED 目标也得给（变量在同一工具链文件内已就绪）
+              printf 'set(CMAKE_SHARED_LINKER_FLAGS_INIT "${CMAKE_SHARED_LINKER_FLAGS_INIT} -L/usr/lib/gcc/${PANDA_TRIPLET}/${MINGW_VERSION} -static-libstdc++ -static-libgcc")\n' >> "$TC"
               echo "toolchain patched in place: $TC" | tee -a "$LOG"
+            fi
+            # v0.3.14 实测根因（本地 mingw8.0 头文件 + 预处理实验复现）：上游 Windows 目标
+            # 注入的 -D_CRTBLD 让 stdio.h/stdlib.h/wchar.h 的
+            # "#if __USE_MINGW_ANSI_STDIO && !defined(_CRTBLD)" 守卫隐藏 C99 的
+            # vsnprintf/snprintf/strtox 声明 → libstdc++ "using ::vsnprintf" 全线报
+            # no member（阶段1 共 640+ 错误同源）。_CRTBLD 宏本身必须保留（关 dllimport
+            # 支撑静态链接），故只摘头文件里的守卫。sysroot 符号链接指向同一批文件。
+            for HF in stdio.h stdlib.h wchar.h; do
+              sudo sed -i 's/ && !defined(_CRTBLD)//g; s/ && !defined (_CRTBLD)//g' \
+                "/usr/share/mingw-w64/include/$HF"
+            done
+            if ! grep -q '__USE_MINGW_ANSI_STDIO && !defined' /usr/share/mingw-w64/include/stdio.h; then
+              echo "mingw 头文件 _CRTBLD 守卫已摘除（stdio/stdlib/wchar）" | tee -a "$LOG"
+            else
+              echo "!! mingw 头文件补丁未生效" | tee -a "$LOG"; exit 1
             fi
             (cmake -S "$CORE" -B build-win -GNinja \
                -DCMAKE_TOOLCHAIN_FILE="$PWD/$TC" \
