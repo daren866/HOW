@@ -1,9 +1,11 @@
-build/
-dist/
+*.exe
 *.o
 *.obj
-*.exe
 *.zip
-__pycache__/
 .vs/
 .vscode/
+HOW
+__pycache__/
+build/
+dist/
+selftest-report.txt

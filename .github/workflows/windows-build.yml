@@ -109,6 +109,90 @@ jobs:
           name: win-xp
           path: HOW-windows-xp.zip
 
+  # ---------- Linux x64 宿主（X11/Xft，v0.3.21 新增） ----------
+  build-linux:
+    name: HOW Linux x64 + selftest (Xvfb)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          # libx11/libxft/fontconfig：X11 渲染链；fonts-noto-cjk：selftest 像素门禁
+          # 的真 CJK 字形渲染（plat_linux.c 字体链会自动验证 charset 含 '中'）
+          sudo apt-get install -y gcc make libx11-dev libxft-dev libfontconfig1-dev \
+            xvfb xauth x11-utils xdotool fonts-noto-cjk zip
+
+      - name: Build (Linux x64)
+        run: |
+          make -f scripts/Makefile.linux HOW=HOW
+          file HOW
+          ldd HOW | head -10
+
+      - name: Headless selftest（无 DISPLAY：渲染门禁 SKIP，其余 10 项门禁）
+        run: |
+          rm -rf ~/.local/share/HOW/apps
+          ./HOW --selftest || { echo "!! headless selftest 失败"; cat selftest-report.txt; exit 1; }
+          grep -q "RESULT: PASS" selftest-report.txt
+
+      - name: Full selftest (Xvfb，含 Xft 渲染像素门禁)
+        run: |
+          rm -rf ~/.local/share/HOW/apps
+          xvfb-run -a -s "-screen 0 1024x768x24" ./HOW --selftest \
+            || { echo "!! Xvfb selftest 失败"; cat selftest-report.txt; exit 1; }
+          cat selftest-report.txt
+          grep -q "RESULT: PASS" selftest-report.txt
+          # 渲染门禁必须真实执行（SKIP 视为失败——本 job 明确装了 Xvfb）
+          grep -q "PASS] ui_render" selftest-report.txt || { echo "!! 渲染门禁未执行"; exit 1; }
+
+      - name: GUI 实证（主窗口创建 + 双击开兼容层窗口全链路）
+        run: |
+          rm -rf ~/.local/share/HOW/apps
+          export DISPLAY=:97
+          Xvfb :97 -screen 0 1280x800x24 > /dev/null 2>&1 &
+          XVFB_PID=$!
+          sleep 2
+          # 先安装样例（列表非空才能双击打开）
+          ./HOW --install samples/MyFirstDemo.hap
+          ./HOW > gui-run.log 2>&1 &
+          APP_PID=$!
+          sleep 3
+          # 1) 主窗口存在且标题正确
+          if xwininfo -root -tree | grep -q "HOW - x64"; then
+            echo "PASS: 主窗口已创建且标题正确"
+          else
+            echo "FAIL: 主窗口未找到"; xwininfo -root -tree; kill $APP_PID $XVFB_PID; exit 1
+          fi
+          # 2) 双击列表区第一行（列表 18,74 起，行高 34 → 中心 ~(200,100)）
+          xdotool mousemove 200 100 click --repeat 2 --delay 60 1
+          sleep 3
+          # 3) 兼容层窗口（“{App name} 兼容层”）应出现
+          if xwininfo -root -tree | grep -q "兼容层"; then
+            echo "PASS: 双击已打开兼容层窗口"
+            xwininfo -root -tree | grep "兼容层"
+          else
+            echo "FAIL: 双击后未见兼容层窗口"; xwininfo -root -tree
+            kill $APP_PID $XVFB_PID; exit 1
+          fi
+          kill $APP_PID 2>/dev/null || true
+          kill $XVFB_PID 2>/dev/null || true
+
+      - name: Package zip (Linux x64)
+        run: |
+          mkdir -p pkg/HOW-linux-x64
+          cp HOW pkg/HOW-linux-x64/
+          cp -r samples pkg/HOW-linux-x64/
+          cp LICENSE README.md pkg/HOW-linux-x64/ 2>/dev/null || true
+          cd pkg && zip -qr ../HOW-linux-x64.zip HOW-linux-x64
+          ls -la HOW-linux-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: HOW-linux-x64.zip
+
   # ---------- HOW Runtime 核心逻辑（Linux 编译 + 单测） ----------
   how-core-linux:
     name: HOW Runtime core tests (Ubuntu x64)
@@ -535,7 +619,7 @@ jobs:
   release:
     name: Release integrate (runtime + renderer bundles)
     runs-on: ubuntu-latest
-    needs: [build-x64, build-xp, how-core-linux, ark-runtime, ark-runtime-windows, renderer-skia]
+    needs: [build-x64, build-xp, build-linux, how-core-linux, ark-runtime, ark-runtime-windows, renderer-skia]
     # v0.3.9 教训：renderer-skia 超时 cancelled 会连带 skip release → 整个 Release 丢失。
     # 改为 always() 下仍运行，但三个必需 job（x64/XP/核心单测，含 selftest 门禁）必须成功；
     # ark-runtime / ark-runtime-windows / renderer-skia 为可选增强（continue-on-error）。
@@ -564,6 +648,8 @@ jobs:
           # 1) Windows 宿主 zip（已含自测门禁）+ 注入真 Ark 运行时组件
           cp "art/win-x64/HOW-windows-x64.zip" .
           cp "art/win-xp/HOW-windows-xp.zip" .
+          # 1.2) Linux x64 宿主（X11/Xft，含 selftest 门禁）
+          cp art/linux-x64/HOW-linux-x64.zip . 2>/dev/null || echo "WARN: linux-x64 artifact 缺失"
 
           # 1.5) 真 Ark 运行时注入：兼容层窗口启动时自动探测 ark/ 并真实执行 modules.abc
           mkdir -p inject/ark/linux inject/ark/windows
@@ -641,6 +727,7 @@ jobs:
           files: |
             HOW-windows-x64.zip
             HOW-windows-xp.zip
+            HOW-linux-x64.zip
             HOW-ark-runtime-ubuntu-x64.zip
             HOW-skia-renderer-ubuntu-x64.zip
           generate_release_notes: true

@@ -93,7 +93,35 @@ cmake --build build --config Release
 
 # MinGW（支持 XP 目标）
 make -f scripts/Makefile.mingw XP=1 CC=gcc HOW=HOW.exe
+
+# Linux x64（X11/Xft，v0.3.21+；依赖 libx11-dev libxft-dev libfontconfig1-dev）
+make -f scripts/Makefile.linux HOW=HOW
 ```
+
+### Linux 版（HOW-linux-x64.zip）
+
+与 Windows 版功能对等：主窗口（标题同 `HOW - x64转译arm模式`）+ 底部
+**安装hap** 按钮 + 已装应用列表 + **双击**打开 `{App name} 兼容层` 窗口；
+布局/渲染引擎与 Windows 侧同一份代码（`ui_render.c` 经 `plat_linux.h` 的
+GDI 子集 shim 复用，Xft/X11 双缓冲软绘制，CJK 字体链自动验证字形）。
+
+```sh
+# 依赖（Debian/Ubuntu）
+sudo apt install libx11-6 libxft2 libfontconfig1 fontconfig fonts-noto-cjk
+
+# 无界面安装 / 自测（CI 门禁）
+./HOW --install samples/MyFirstDemo.hap
+./HOW --selftest                 # 无 DISPLAY：渲染门禁 SKIP
+xvfb-run -a ./HOW --selftest     # 含 Xft 渲染像素门禁（CI 用）
+
+# GUI（需 X11 / Wayland-XWayland）
+./HOW
+```
+
+命令行交互差异：`安装hap` 优先调用 `zenity` 文件选择器；无 zenity 时用
+`HOW --install 文件.hap` 或设置 `HOW_HAP_PATH` 环境变量。应用存储于
+`~/.local/share/HOW/apps`（XDG 标准）。真 Ark 运行时探测：`ark/linux/`
+下若存在 `ark_js_vm` 则直接 fork/exec 真实执行 modules.abc。
 
 ### 体验
 
@@ -118,18 +146,21 @@ make -f scripts/Makefile.mingw XP=1 CC=gcc HOW=HOW.exe
 
 ```
 src/
- ├─ main.c        主窗口：标题、应用列表、安装hap按钮、安装确认流程
- ├─ compat.c      兼容层窗口：工具栏/页面/运行日志三区，加载 .abc + UI 模式
- ├─ store.c       HAP 安装/探测/清单（miniz 解压 + app.json5 解析）
- ├─ ui_parse.c    RtState 生命周期、日志、声明式组件树解析
- ├─ ui_render.c   Flex 布局 + GDI 双缓冲渲染 + 命中测试与动作执行
+ ├─ main.c        主窗口：标题、应用列表、安装hap按钮、安装确认流程（Windows）
+ ├─ compat.c      兼容层窗口：工具栏/页面/运行日志三区，加载 .abc + UI 模式（Windows）
+ ├─ store.c       HAP 安装/探测/清单（miniz 解压 + app.json5 解析）（Windows）
+ ├─ ui_parse.c    RtState 生命周期、日志、声明式组件树解析（跨平台复用）
+ ├─ ui_render.c   Flex 布局 + 双缓冲渲染 + 命中测试与动作执行（跨平台复用）
+ ├─ plat_linux.h/c  Linux GDI 子集 shim（DrawTextW/FillRect/RoundRect → Xft/X11）
+ ├─ host_linux.c  Linux 平台层：X11 主窗口/兼容层窗口/store/selftest/arkrt
  ├─ abc.c         Panda .abc 容器解析 + HOWVM 虚拟机
  ├─ json.c        JSON5 宽松解析器
- ├─ selftest.c    --selftest 无界面自测（CI 兼容层运行门禁）
+ ├─ selftest.c    --selftest 无界面自测（CI 兼容层运行门禁）（Windows）
  └─ how.h/howcore.h
 third_party/miniz/       公共领域 zip 读写库（解压 HAP）
 samples/MyFirstDemo.hap  示例应用（含真实 PACA 头 .abc + HOWVM 字节码）
 scripts/Makefile.mingw   MinGW 构建（Windows 本机 / MSYS2 / 交叉）
+scripts/Makefile.linux   Linux x64 构建（gcc + X11/Xft）
 scripts/test_core.c      核心层 Linux 单测（18 项断言）
 tools/make_sample_hap.py 样例 HAP 生成器
 ```

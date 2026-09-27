@@ -2,10 +2,17 @@
 #ifndef HOW_H
 #define HOW_H
 
+/* 平台分支：Windows 走 Win32；其余平台（Linux/X11）走 plat shim。
+ * Linux 下复用的仅是 howcore VM + ui_parse/ui_render 布局渲染引擎；
+ * 窗口/存储/自测等平台层见 host_linux.c。 */
+#ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include "plat_linux.h"
+#endif
 #include "howcore.h"
 
 #define APP_TITLEW L"HOW - x64\u8f6c\u8bd1arm\u6a21\u5f0f"   /* HOW - x64转译arm模式 */
@@ -106,7 +113,8 @@ int            arkrt_exec(ArkRtProbe *p, const wchar_t *abcPathW,
                           char *outBuf, int outCap); /* 真实执行，返回进程退出码 */
 const wchar_t *arkrt_engine_name(HowEngine t); /* 引擎徽标显示名 */
 
-/* ---------------- 兼容层窗口 ---------------- */
+#ifdef _WIN32
+/* ---------------- 兼容层窗口（Win32 平台层签名；Linux 版见 host_linux.c） ---------------- */
 void compat_register(HINSTANCE hInst);
 void compat_open(HINSTANCE hInst, AppInfo *app);
 void compat_set_quit_on_close(int on);                /* --show 模式：关窗即退出 */
@@ -115,5 +123,6 @@ void compat_paint(RtState *rt, HDC hdc, int pw, int ph,
 
 /* ---------------- 自测（--selftest） ---------------- */
 int run_selftest(HINSTANCE hInst);
+#endif
 
 #endif
