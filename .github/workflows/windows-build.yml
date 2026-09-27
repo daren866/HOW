@@ -189,7 +189,7 @@ jobs:
           cp HOW pkg/HOW-linux-x64/
           cp -r samples pkg/HOW-linux-x64/
           cp LICENSE README.md pkg/HOW-linux-x64/ 2>/dev/null || true
-          cd pkg && zip -qr ../HOW-linux-x64.zip HOW-linux-x64
+          (cd pkg && zip -qr ../HOW-linux-x64.zip HOW-linux-x64)
           ls -la HOW-linux-x64.zip
 
       - uses: actions/upload-artifact@v4
