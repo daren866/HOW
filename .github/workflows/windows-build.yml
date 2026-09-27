@@ -165,8 +165,12 @@ jobs:
           else
             echo "FAIL: 主窗口未找到"; xwininfo -root -tree; kill $APP_PID $XVFB_PID; exit 1
           fi
-          # 2) 双击列表区第一行（列表 18,74 起，行高 34 → 中心 ~(200,100)）
-          xdotool mousemove 200 100 click --repeat 2 --delay 60 1
+          # 2) 双击列表区第一行。xdotool 用屏幕坐标 —— 主窗口在 (260,120)，
+          #    直接 (200,100) 会落在窗口外（v0.3.21 run 92 实证），需按窗口几何换算
+          WID=$(xdotool search --name "HOW - x64" | head -1)
+          eval "$(xdotool getwindowgeometry --shell "$WID")"
+          echo "main window $WID at ($X,$Y)"
+          xdotool mousemove $((X + 200)) $((Y + 100)) click --repeat 2 --delay 60 1
           sleep 3
           # 3) 兼容层窗口（“{App name} 兼容层”）应出现
           if xwininfo -root -tree | grep -q "兼容层"; then
